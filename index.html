@@ -80,11 +80,18 @@ canvas#work{display:none}
     <div class="mut">Jede Karte: Vorderseite + optional Rückseite fotografieren, Karte auswählen, Foto analysieren. Danach nächste Karte.</div>
     <div class="clist" id="batchList"></div>
   </div>
+  <div class="panel">
+    <h2>Verlauf <span class="mut" id="histCount" style="font-size:12px"></span></h2>
+    <div class="mut">Bereits gescannte Karten — antippen zum Öffnen. Gleiche Karte muss nicht erneut gescannt werden.</div>
+    <div id="histList"></div>
+    <button class="ghost" id="btnHistClear" style="color:var(--bad)">🗑 Verlauf löschen</button>
+  </div>
 </section>
 
 <!-- ============ KARTE (Analyse) ============ -->
 <section class="screen" id="scr-card">
   <div id="curName" class="big" style="margin:6px 0">Neue Karte</div>
+  <div class="okbox" id="dupNote" style="display:none"></div>
   <div class="panel">
     <h2>Karte identifizieren</h2>
     <div class="setline"><input type="search" id="q" placeholder="z.B. Charizard ex 199/197"><button class="ghost" style="width:auto;margin:0" id="btnSearch">Suchen</button></div>
@@ -132,10 +139,14 @@ canvas#work{display:none}
   <div class="panel" id="valPanel">
     <h2>Wert</h2>
     <div class="row"><span class="k">Cardmarket (ungraded, Trend)</span><span class="v" id="vRaw">–</span></div>
+    <div class="row"><span class="k">Karten-Sprache</span><span class="v"><select id="cmLang" style="background:#12141a;color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:6px;font-size:14px">
+      <option value="3" selected>Deutsch</option><option value="1">Englisch</option><option value="2">Französisch</option><option value="4">Spanisch</option><option value="5">Italienisch</option><option value="7">Japanisch</option></select></span></div>
     <div class="row"><span class="k">≈ PSA 9 (gut)</span><span class="v" id="v9">–</span></div>
     <div class="row"><span class="k">≈ PSA 10 (gem)</span><span class="v" id="v10">–</span></div>
     <div class="row"><span class="k">Gradings-Kosten (PSA + Versand ca.)</span><span class="v">~23 €</span></div>
     <div class="okbox" id="vVerdict" style="display:none"></div>
+    <button class="ghost" id="btnCm" style="display:none">🔗 Cardmarket-Seite öffnen (Preis-Graph gegenprüfen)</button>
+    <div class="mut" id="cmHint"></div>
   </div>
   <button class="act" id="btnSave">💾 Karte speichern</button>
   <button class="ghost" id="btnDiscard">Verwerfen / Neue Karte</button>
@@ -214,7 +225,7 @@ function stopCam(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=nul
 
 // ---------- current card state ----------
 let cur=null; // {front, back, thumb, quality, centering, cardId, ...}
-function newCard(){return{id:Date.now()+''+Math.floor(Math.random()*999),ts:Date.now(),front:null,back:null,thumb:null,quality:null,centering:null,flaws:{},cardId:null,cardName:'',cardSet:'',cardNum:'',priceRaw:null,price9:null,price10:null,grade:null};}
+function newCard(){return{id:Date.now()+''+Math.floor(Math.random()*999),ts:Date.now(),front:null,back:null,thumb:null,quality:null,centering:null,flaws:{},cardId:null,cardName:'',cardSet:'',cardNum:'',cardRarity:'',cardDate:'',cmUrl:'',cmLang:'3',priceRaw:null,price9:null,price10:null,grade:null,dupNote:null};}
 cur=newCard();
 
 function drawToCanvas(img){const c=$('work');const M=2000;const sc=Math.min(1,M/Math.max(img.width,img.height));
@@ -333,6 +344,13 @@ function renderCard(){
   $('iNum').textContent=c.cardNum||'–';
   $('iRar').textContent=c.cardRarity||'–';
   $('iDate').textContent=c.cardDate||'–';
+  const bt=$('btnCm');
+  if(c.cmUrl){bt.style.display='block';bt.onclick=()=>window.open(c.cmUrl+'?language='+$('cmLang').value,'_blank');}
+  else{bt.style.display='none';}
+  if(c.cmLang)$('cmLang').value=c.cmLang;else $('cmLang').value=DB.settings.lang||'3';
+  $('cmHint').textContent=c.cmUrl?'Trend-Preis = alle Sprachen/Konditionen. Button öffnet Cardmarket mit Sprachfilter (Standort Deutschland).':''; 
+  const dn=$('dupNote');
+  if(c.dupNote){dn.style.display='block';dn.textContent='🔁 '+c.dupNote;}else dn.style.display='none';
   // quality
   if(c.quality){
     const q=c.quality;
@@ -399,6 +417,7 @@ function renderCard(){
 for(const k of['white','scratch','corner','bend','print','shine']){
   $('f_'+k).onchange=e=>{cur.flaws[k]=e.target.checked;cur.grade=estimate(cur);renderCard();};
 }
+$('cmLang').onchange=e=>{cur.cmLang=e.target.value;DB.settings.lang=e.target.value;save();};
 
 // ---------- capture ----------
 $('btnShot').onclick=()=>shotMode='front',$('btnShot').onclick=()=>{shotMode='front';snap();};
@@ -429,7 +448,7 @@ $('btnSave').onclick=()=>{
   DB.cards.unshift(cur);save();
   toast('Karte gespeichert.');
   cur=newCard();$('results').innerHTML='';$('vRaw').textContent='–';$('v9').textContent='–';$('v10').textContent='–';
-  renderBatch();nav('scan');
+  renderBatch();renderHist();renderList();nav('scan');
 };
 $('btnDiscard').onclick=()=>{cur=newCard();$('results').innerHTML='';nav('scan');};
 
@@ -444,6 +463,30 @@ function renderBatch(){
     l.appendChild(d);
   });
 }
+
+// ---------- history list (scan screen) ----------
+function renderHist(){
+  const l=$('histList');l.innerHTML='';
+  $('histCount').textContent=`(${DB.cards.length})`;
+  if(!DB.cards.length){l.innerHTML='<div class="mut">Noch keine Karten gescannt.</div>';}
+  [...DB.cards].sort((a,b)=>b.ts-a.ts).forEach(c=>{
+    const d=document.createElement('div');d.className='res';
+    const cls=c.grade?gradeCls(c.grade.overall):'';
+    d.innerHTML=`<img src="${c.thumb||''}" loading="lazy"><div class="t"><b>${esc(c.cardName||'Unbenannt')}</b>${esc(c.cardSet||'')}<br><span class="mut">${new Date(c.ts).toLocaleDateString('de-DE')} · ${c.grade?c.grade.overall+'/10':'kein Grade'}</span></div><div class="p"><span class="${cls}">${c.grade?c.grade.overall:''}</span><br>${c.priceRaw!=null?eur(c.priceRaw):'–'}</div><button class="ghost" data-del style="width:auto;margin:0;padding:4px 8px">🗑</button>`;
+    d.onclick=e=>{
+      if(e.target.closest('[data-del]')){
+        e.stopPropagation();
+        DB.cards=DB.cards.filter(x=>x!==c);save();renderHist();renderBatch();renderList();
+        return;
+      }
+      cur=c;renderCard();nav('card');
+    };
+    l.appendChild(d);
+  });
+}
+$('btnHistClear').onclick=()=>{
+  if(confirm('Wirklich den gesamten Verlauf löschen?')){DB.cards=[];save();renderHist();renderBatch();renderList();}
+};
 
 // ---------- API ----------
 async function apiSearch(q){
@@ -470,11 +513,15 @@ $('btnSearch').onclick=async()=>{
     d.onclick=()=>{
       cur.cardId=c.id;cur.cardName=c.name;cur.cardSet=c.set.name;cur.cardNum=c.number;
       cur.cardRarity=c.rarity||'';cur.cardDate=(c.set&&c.set.releaseDate)||'';
+      cur.cmUrl=(c.cardmarket&&c.cardmarket.url)||'';
       const trend=cm!=null?cm:(tc!=null?tc*0.93:null);
       cur.priceRaw=trend!=null?Math.round(trend*100)/100:null;
       cur.price9=cur.priceRaw!=null?Math.round(cur.priceRaw*1.5*100)/100:null;
       cur.price10=cur.priceRaw!=null?Math.round(cur.priceRaw*2.5*100)/100:null;
       cur.grade=estimate(cur);
+      // duplicate check: already scanned?
+      const dup=DB.cards.find(x=>(c.id&&x.cardId===c.id)||(x.cardName===c.name&&x.cardSet===c.set.name&&x.cardNum===c.number));
+      cur.dupNote=dup?`Bereits im Verlauf (${new Date(dup.ts).toLocaleDateString('de-DE')}, Grade ${dup.grade?dup.grade.overall:'–'}) — kein erneuter Scan nötig.`:null;
       renderCard();
     };
     box.appendChild(d);
@@ -521,7 +568,7 @@ $('btnKeySave').onclick=()=>{DB.settings.apiKey=$('inpKey').value.trim();save();
 if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{});}
 
 // init
-renderBatch();
+renderBatch();renderHist();
 if(DB.cards.length){renderList();}
 startCam();
 </script>
