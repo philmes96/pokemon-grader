@@ -97,13 +97,14 @@ canvas#work{display:none}
   </div>
 </section>
 
-<!-- ============ KARTE (Analyse) ============ -->
-<section class="screen" id="scr-card">
+<!-- ============ ERKENNER (Identifikation) ============ -->
+<section class="screen" id="scr-ident">
   <div id="curName" class="big" style="margin:6px 0">Neue Karte</div>
   <div class="okbox" id="dupNote" style="display:none"></div>
   <div class="panel">
     <h2>Karte identifizieren</h2>
-    <div class="setline"><input type="search" id="q" placeholder="z.B. Charizard ex 199/197"><button class="ghost" style="width:auto;margin:0" id="btnSearch">Suchen</button></div>
+    <div class="mut">Name oder Set + Nummer eingeben, z.B. <b>Pikachu VMAX Vivid Voltage 44</b> oder <b>199/197</b> zusammen mit Name.</div>
+    <div class="setline"><input type="search" id="q" placeholder="z.B. Charizard ex 199/197 oder Vivid Voltage 44"><button class="ghost" style="width:auto;margin:0" id="btnSearch">Suchen</button></div>
     <button class="ghost" id="btnOcr">🔍 Karte aus Foto erkennen (OCR)</button>
     <div id="results"></div>
   </div>
@@ -114,6 +115,13 @@ canvas#work{display:none}
     <div class="row"><span class="k">Seltenheit</span><span class="v" id="iRar">–</span></div>
     <div class="row"><span class="k">Release</span><span class="v" id="iDate">–</span></div>
   </div>
+  <button class="act" id="btnToGrade">🧪 Weiter zur Grading-Bewertung</button>
+  <button class="ghost" id="btnDiscard2">Verwerfen / Neue Karte</button>
+</section>
+
+<!-- ============ GRADING (Analyse) ============ -->
+<section class="screen" id="scr-grade">
+  <div id="curName2" class="big" style="margin:6px 0">Neue Karte</div>
   <div class="panel">
     <h2>Foto-Qualität</h2>
     <div class="row"><span class="k">Schärfe</span><span class="v" id="qBlur">–</span></div>
@@ -156,6 +164,7 @@ canvas#work{display:none}
     <button class="ghost" id="btnCm" style="display:none">🔗 Auf Cardmarket suchen (Preis-Graph gegenprüfen)</button>
     <div class="mut" id="priceNote" style="color:var(--warn)"></div><div class="mut" id="cmHint"></div>
   </div>
+  <button class="ghost" id="btnBackIdent">← Zurück zur Identifikation</button>
   <button class="act" id="btnSave">💾 Karte speichern</button>
   <button class="ghost" id="btnDiscard">Verwerfen / Neue Karte</button>
 </section>
@@ -189,7 +198,8 @@ canvas#work{display:none}
 
 </main>
 <div id="menu" class="menu hidden">
-  <button data-s="scan" class="active">📷 Scannen</button>
+  <button data-s="scan" class="active">📷 Erkenner</button>
+  <button data-s="grade">🧪 Grading</button>
   <button data-s="list">📋 Verlauf &amp; Liste</button>
   <button data-s="set">⚙️ Setup</button>
 </div>
@@ -214,6 +224,7 @@ function nav(s){document.querySelectorAll('.screen').forEach(e=>e.classList.remo
   document.querySelectorAll('#menu button').forEach(b=>b.classList.toggle('active',b.dataset.s===s));
   const m=$('menu');if(m)m.classList.add('hidden');
   if(s==='scan')startCam();else stopCam();}
+function navCardTarget(){return cur&&cur.front?'grade':'ident';}
 const _menu=$('menu');
 document.querySelectorAll('#menu button').forEach(b=>b.onclick=()=>nav(b.dataset.s));
 $('menuBtn').onclick=e=>{_menu.classList.toggle('hidden');e.stopPropagation();};
@@ -261,14 +272,23 @@ function ovLoop(){
   const cx=bx+bw/2,cy=by+bh/2;
   const offX=Math.abs(cx-W/2)/W,offY=Math.abs(cy-H/2)/H;
   const fill=(bw*bh)/(gw*gh);
-  const okAr=ar>0.62&&ar<0.80, okPos=offX<0.07&&offY<0.09, okFill=fill>0.8&&fill<1.35;
+  const okAr=ar>0.58&&ar<0.85, okPos=offX<0.10&&offY<0.13, okFill=fill>0.7&&fill<1.6;
   const good=okAr&&okPos&&okFill;
   ctx.strokeStyle=good?'#3fbf6f':'#e05555';ctx.lineWidth=6;
   ctx.strokeRect(bx,by,bw,bh);
   b.classList.toggle('good',good);
-  b.textContent=good?'✓ Karte gut platziert — auslösen':(okAr?'Karte mittiger ausrichten':'Karte gerade + mittig im Rahmen');
+  if(good&&shotMode==='front'&&!cur.front&&!autoShotDone){
+    if(!goodT0)goodT0=Date.now();
+    const rem=2-(Date.now()-goodT0)/1000;
+    if(rem<=0){autoShotDone=true;goodT0=null;b.textContent='📸 Aufgenommen';setTimeout(()=>snap('front'),80);}
+    else b.textContent=`✓ Still halten — Auslösung in ${rem.toFixed(1)} s`;
+  }else{
+    goodT0=null;
+    b.textContent=good?'✓ Karte gut platziert — auslösen':(okAr?'Karte mittiger ausrichten':'Karte gerade + mittig im Rahmen');
+  }
   b.classList.remove('hidden');
 }
+let goodT0=null,autoShotDone=false;
 function ovStart(){if(!ovTimer)ovTimer=setInterval(ovLoop,350);}
 
 // ---------- current card state ----------
@@ -282,6 +302,7 @@ function drawToCanvas(img){const c=$('work');const M=2000;const sc=Math.min(1,M/
 function loadImg(dataUrl){return new Promise(res=>{const i=new Image();i.onload=()=>res(i);i.src=dataUrl;});}
 
 async function acceptImage(dataUrl,side){
+  if(side==='front')autoShotDone=true;
   cur[side]=dataUrl;
   const img=await loadImg(dataUrl);
   const c=drawToCanvas(img);
@@ -309,7 +330,7 @@ async function acceptImage(dataUrl,side){
     }else cur.anno=null;
     cur.grade=estimate(cur);
     renderCard();
-    nav('card');
+    nav('ident');
     if(!cur.cardName)ocrIdentify();
   }
   $('btnBack').textContent=cur.back?'✅ Rückseite gespeichert — nochmal aufnehmen?':'🔄 Rückseite fotografieren';
@@ -403,7 +424,8 @@ function gradeLabel(g){return g>=10?'GEM MINT':g>=9.5?'PSA 9.5-10':g>=9?'PSA 9':
 // ---------- render card screen ----------
 function renderCard(){
   const c=cur;
-  $('curName').textContent=c.cardName?`${c.cardName} — ${c.cardNum}`:c.back&&!c.front?'Neue Karte (Rückseite)':'Neue Karte';
+  const nm=c.cardName?`${c.cardName} — ${c.cardNum}${c.cardSet?' · '+c.cardSet:''}`:(c.back&&!c.front?'Neue Karte (Rückseite)':'Neue Karte');
+  $('curName').textContent=nm;$('curName2').textContent=nm;
   $('iSet').textContent=c.cardSet||'–';
   $('iNum').textContent=c.cardNum||'–';
   $('iRar').textContent=c.cardRarity||'–';
@@ -504,9 +526,12 @@ $('btnSave').onclick=()=>{
   DB.cards.unshift(cur);save();
   toast('Karte gespeichert.');
   cur=newCard();$('results').innerHTML='';$('vRaw').textContent='–';$('v9').textContent='–';$('v10').textContent='–';
-  renderBatch();renderHist();renderList();nav('scan');
+  renderBatch();renderHist();renderList();autoShotDone=false;nav('scan');
 };
-$('btnDiscard').onclick=()=>{cur=newCard();$('results').innerHTML='';nav('scan');};
+$('btnDiscard').onclick=()=>{cur=newCard();$('results').innerHTML='';autoShotDone=false;nav('scan');};
+$('btnDiscard2').onclick=()=>{cur=newCard();$('results').innerHTML='';autoShotDone=false;nav('scan');};
+$('btnToGrade').onclick=()=>nav('grade');
+$('btnBackIdent').onclick=()=>nav('ident');
 
 // ---------- batch list (scan screen) ----------
 function renderBatch(){
@@ -515,7 +540,7 @@ function renderBatch(){
   DB.cards.slice(0,12).forEach(c=>{
     const d=document.createElement('div');d.className='cc';
     d.innerHTML=`<img src="${c.thumb||''}"><div style="font-size:12px">${c.grade?c.grade.overall+'/10':'–'}<br><span class="mut">${c.priceRaw!=null?eur(c.priceRaw):'kein Wert'}</span></div>`;
-    d.onclick=()=>{cur=c;renderCard();nav('card');};
+    d.onclick=()=>{cur=c;renderCard();nav('ident');};
     l.appendChild(d);
   });
 }
@@ -535,7 +560,7 @@ function renderHist(){
         DB.cards=DB.cards.filter(x=>x!==c);save();renderHist();renderBatch();renderList();
         return;
       }
-      cur=c;renderCard();nav('card');
+      cur=c;renderCard();nav('ident');
     };
     l.appendChild(d);
   });
@@ -594,17 +619,61 @@ async function cardPrice(c){
     return row?{usd:row.marketPrice,url,tcgSet:g.name}:{note:'Kein Preis für #'+c.localId+' in "'+g.name+'"'};
   }catch(e){return{note:'Preisabruf fehlgeschlagen'};}
 }
+async function tgSets(){
+  if(DB.settings.setsCache&&Date.now()-DB.settings.setsCache.ts<30*864e5)return DB.settings.setsCache.data;
+  const j=await fetch('https://api.tcgdex.net/v2/en/sets').then(r=>r.json());
+  DB.settings.setsCache={ts:Date.now(),data:j||[]};save();
+  return j||[];
+}
+function numKey(s){const m=(s||'').replace(/\s/g,'').match(/^0*(\d+)/);return m?m[1]:null;}
+function parseQuery(q){
+  let num=null,rest=q;
+  const m=q.match(/(\d+)\s*(?:\/\s*\d+)?\s*$/);
+  if(m){num=numKey(m[1]);rest=q.slice(0,m.index).trim();}
+  return{num,rest};
+}
 async function doSearch(q,auto){
   $('results').innerHTML='<div class="mut">Suche…</div>';
-  let list=[];
-  try{
-    const r=await fetch('https://api.tcgdex.net/v2/en/cards?name='+encodeURIComponent(q));
-    const j=await r.json();
-    if(Array.isArray(j))list=j;
-  }catch(e){}
-  list=list.filter(x=>x.image).slice(0,16);
-  if(!list.length){$('results').innerHTML='<div class="mut">Keine Treffer.</div>';return;}
-  const details=(await Promise.all(list.map(x=>fetch('https://api.tcgdex.net/v2/en/cards/'+x.id).then(r=>r.json()).catch(()=>null)))).filter(Boolean);
+  const{num,rest}=parseQuery(q);
+  let details=[];
+  const restLc=rest.toLowerCase().replace(/&/g,'and').replace(/[^a-z0-9]+/g,' ').trim();
+  if(rest){
+    // resolve set by name (fuzzy: longest set-name contained in query)
+    const sets=await tgSets();
+    const sorted=[...sets].sort((a,b)=>b.name.length-a.name.length);
+    let set=null,namePart=rest;
+    const restL=rest.toLowerCase();
+    for(const s of sorted){
+      const sn=s.name.toLowerCase().replace(/&/g,'and').replace(/[^a-z0-9]+/g,' ').trim();
+      if(sn.length>2&&restLc.includes(sn)){set=s;break;}
+    }
+    if(set){
+      namePart=rest;
+      const j=await fetch('https://api.tcgdex.net/v2/en/sets/'+set.id).then(r=>r.json()).catch(()=>null);
+      let cards=(j&&j.cards)||[];
+      if(num!=null)cards=cards.filter(x=>numKey(x.localId||x.id&&x.id.split('-').pop())===num);
+      if(rest.length>sn.length+2||namePart&&namePart!==rest){
+        const nl=restLc;
+        const filtered=cards.filter(x=>nl.includes((x.name||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim())||nl.includes((x.name||'').toLowerCase()));
+        if(filtered.length)cards=filtered;
+      }
+      details=(await Promise.all(cards.slice(0,16).map(x=>fetch('https://api.tcgdex.net/v2/en/cards/'+x.id).then(r=>r.json()).catch(()=>null)))).filter(Boolean);
+    }else{
+      let list=[];
+      try{
+        const r=await fetch('https://api.tcgdex.net/v2/en/cards?name='+encodeURIComponent(rest));
+        const j=await r.json();
+        if(Array.isArray(j))list=j;
+      }catch(e){}
+      list=list.filter(x=>x.image).slice(0,24);
+      if(num!=null)list=list.filter(x=>numKey((x.id||'').split('-').pop())===num);
+      details=(await Promise.all(list.slice(0,16).map(x=>fetch('https://api.tcgdex.net/v2/en/cards/'+x.id).then(r=>r.json()).catch(()=>null)))).filter(Boolean);
+    }
+  }else if(num!=null){
+    $('results').innerHTML='<div class="mut">Nur Nummer reicht nicht — bitte Set oder Kartenname mit angeben (z.B. "Vivid Voltage 44").</div>';return;
+  }
+  details.sort((a,b)=>(a.id<b.id?-1:1));
+  if(!details.length){$('results').innerHTML='<div class="mut">Keine Treffer. Tipp: Set-Name + Nummer, z.B. "Obsidian Flames 199".</div>';return;}
   const box=$('results');box.innerHTML='';
   details.forEach(c=>{
     const d=document.createElement('div');d.className='res';
@@ -684,7 +753,7 @@ function renderList(){
     const cls=c.grade?gradeCls(c.grade.overall):'';
     const d=document.createElement('div');d.className='res';
     d.innerHTML=`<img src="${c.thumb||''}"><div class="t"><b>${esc(c.cardName||'Unbenannt')}</b>${esc(c.cardSet||'')}<br><span class="mut">${c.grade?c.grade.overall+'/10':'kein Foto'}</span></div><div class="p"><span class="${cls}">${c.grade?c.grade.overall:''}</span><br>${c.priceRaw!=null?eur(c.priceRaw):'–'}</div>`;
-    d.onclick=()=>{cur=c;renderCard();nav('card');};
+    d.onclick=()=>{cur=c;renderCard();nav('ident');};
     box.appendChild(d);
   });
   $('sumTxt').textContent=`${cnt} Karten · Summe ungraded ${eur(sum)} · ${cntWorth} Karten mit Gradings-Potenzial`;
