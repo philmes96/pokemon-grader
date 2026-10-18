@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CardGrader</title>
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+:root{--bg:#12141a;--card:#1c1f28;--fg:#e8eaf0;--mut:#8b90a0;--acc:#ffcc00;--ok:#3fbf6f;--warn:#e0a020;--bad:#e05555;--border:#2a2e3a}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,sans-serif;font-size:15px;padding-bottom:70px}
+header{position:fixed;top:0;left:0;right:0;background:var(--card);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:10px 14px;z-index:10}
+header h1{font-size:17px;font-weight:700;flex:1}
+header .badge{font-size:12px;color:var(--mut)}
+nav{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--border);display:flex;z-index:10}
+nav button{flex:1;background:none;border:none;color:var(--mut);padding:12px 0 14px;font-size:11px;display:flex;flex-direction:column;align-items:center;gap:3px}
+nav button.active{color:var(--acc)}
+nav button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2}
+main{padding:64px 14px 20px;max-width:640px;margin:0 auto}
+.screen{display:none}.screen.active{display:block}
+button.act{background:var(--acc);color:#111;border:none;border-radius:8px;padding:12px 18px;font-size:15px;font-weight:600;width:100%;margin:8px 0}
+button.ghost{background:var(--card);color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:14px;width:100%;margin:8px 0}
+button:disabled{opacity:.45}
+video{width:100%;border-radius:12px;background:#000;max-height:60vh;object-fit:cover}
+img.shot{width:100%;border-radius:12px;display:block}
+.panel{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin:10px 0}
+.panel h2{font-size:15px;margin-bottom:8px}
+.panel h3{font-size:13px;color:var(--mut);margin:10px 0 6px;font-weight:600}
+.row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;gap:10px}
+.row .k{color:var(--mut);font-size:13px}
+.row .v{font-weight:600;text-align:right}
+input[type=text],input[type=search],input[type=number]{background:#12141a;border:1px solid var(--border);color:var(--fg);border-radius:8px;padding:10px;font-size:15px;width:100%}
+input[type=range]{width:100%}
+.flag{display:flex;align-items:center;gap:8px;padding:7px 0;font-size:14px}
+.flag input{width:18px;height:18px;accent-color:var(--acc)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.chip{background:#12141a;border:1px solid var(--border);border-radius:20px;padding:6px 12px;font-size:13px}
+.score{font-size:44px;font-weight:800;text-align:center}
+.score small{font-size:14px;color:var(--mut)}
+.vgood{color:var(--ok)}.good{color:#8fd045}.ok{color:var(--warn)}.bad{color:var(--bad)}
+.clist{display:flex;gap:10px;overflow-x:auto;padding:4px 0}
+.clist .cc{min-width:110px;background:#12141a;border:1px solid var(--border);border-radius:10px;padding:8px;text-align:center;flex-shrink:0}
+.clist img{width:80px;height:112px;object-fit:cover;border-radius:6px;margin-bottom:4px}
+.clist .cc.sel{border-color:var(--acc)}
+.res{border:1px solid var(--border);border-radius:10px;padding:10px;margin:8px 0;display:flex;gap:10px;align-items:center}
+.res img{width:50px;height:70px;border-radius:4px;flex-shrink:0}
+.res .t{flex:1;font-size:13px}.res .t b{display:block;font-size:14px}
+.res .p{text-align:right;font-size:13px}
+.mut{color:var(--mut);font-size:13px}
+.warnbox{background:#3a2f14;border:1px solid #6b5515;border-radius:10px;padding:10px 12px;font-size:13px;margin:8px 0;color:#f0d080}
+.okbox{background:#14301e;border:1px solid #1f6b3d;border-radius:10px;padding:10px 12px;font-size:13px;margin:8px 0;color:#a0e0b8}
+.hidden{display:none!important}
+.setline{display:flex;gap:8px;margin-top:8px}
+.setline input{flex:1}
+#picker{display:none}
+canvas#work{display:none}
+.center-img{position:relative;width:100%;background:#000;border-radius:12px;overflow:hidden}
+.center-img img{width:100%;display:block}
+.center-img canvas{position:absolute;inset:0;width:100%;height:100%}
+.big{font-size:18px;font-weight:700}
+.dl{text-align:center;margin-top:10px}
+</style>
+</head>
+<body>
+<header><h1>🃏 CardGrader</h1><span class="badge" id="hdrCount">0 Karten</span></header>
+<main>
+
+<!-- ============ SCAN ============ -->
+<section class="screen active" id="scr-scan">
+  <video id="cam" autoplay playsinline muted></video>
+  <button class="act" id="btnShot">📸 Foto aufnehmen (Vorderseite)</button>
+  <button class="ghost" id="btnPick">📁 Foto aus Galerie wählen</button>
+  <button class="ghost" id="btnBack">🔄 Rückseite fotografieren</button>
+  <input type="file" id="picker" accept="image/*" capture="environment">
+  <div class="warnbox" id="camErr" style="display:none"></div>
+  <div class="panel">
+    <h2>Batch</h2>
+    <div class="mut">Jede Karte: Vorderseite + optional Rückseite fotografieren, Karte auswählen, Foto analysieren. Danach nächste Karte.</div>
+    <div class="clist" id="batchList"></div>
+  </div>
+</section>
+
+<!-- ============ KARTE (Analyse) ============ -->
+<section class="screen" id="scr-card">
+  <div id="curName" class="big" style="margin:6px 0">Neue Karte</div>
+  <div class="panel">
+    <h2>Karte identifizieren</h2>
+    <div class="setline"><input type="search" id="q" placeholder="z.B. Charizard ex 199/197"><button class="ghost" style="width:auto;margin:0" id="btnSearch">Suchen</button></div>
+    <div id="results"></div>
+  </div>
+  <div class="panel">
+    <h2>Foto-Qualität</h2>
+    <div class="row"><span class="k">Schärfe</span><span class="v" id="qBlur">–</span></div>
+    <div class="row"><span class="k">Reflexionen</span><span class="v" id="qGlare">–</span></div>
+    <div class="row"><span class="k">Karte erkannt / Füllgrad</span><span class="v" id="qFill">–</span></div>
+    <div class="mut" id="qHint"></div>
+  </div>
+  <div class="panel">
+    <h2>Centering (automatisch, grob)</h2>
+    <div class="center-img"><img id="centerImg"><canvas id="centerCv"></canvas></div>
+    <div class="row"><span class="k">Horizontal L : R</span><span class="v" id="cLR">–</span></div>
+    <div class="row"><span class="k">Vertikal O : U</span><span class="v" id="cTB">–</span></div>
+    <div class="mut" id="cHint"></div>
+  </div>
+  <div class="panel">
+    <h2>Sichtbare Mängel (Selbsteinschätzung)</h2>
+    <label class="flag"><input type="checkbox" id="f_white"> Whitening an Kanten (weiße Stellen)</label>
+    <label class="flag"><input type="checkbox" id="f_scratch"> Kratzer / Schrammen auf Oberfläche</label>
+    <label class="flag"><input type="checkbox" id="f_corner"> Abgestoßene Ecken</label>
+    <label class="flag"><input type="checkbox" id="f_bend"> Biegung / Delle</label>
+    <label class="flag"><input type="checkbox" id="f_print"> Printlinien / Druckfehler</label>
+    <label class="flag"><input type="checkbox" id="f_shine"> Oberfläche matt / Glanz verloren</label>
+  </div>
+  <div class="panel">
+    <h2>Grading-Einschätzung</h2>
+    <div class="score" id="gradeNum">–</div>
+    <div class="mut" style="text-align:center" id="gradeTxt"></div>
+    <div class="row"><span class="k">Centering</span><span class="v" id="gC">–</span></div>
+    <div class="row"><span class="k">Edges / Corners</span><span class="v" id="gE">–</span></div>
+    <div class="row"><span class="k">Oberfläche</span><span class="v" id="gS">–</span></div>
+    <div class="warnbox">⚠️ Orientierungswert aus einem Foto. PSA prüft unter Lupe + Both Sides + Holo-Art. Reale Abweichung ±1 Stufe normal.</div>
+  </div>
+  <div class="panel" id="valPanel">
+    <h2>Wert</h2>
+    <div class="row"><span class="k">Cardmarket (ungraded, Trend)</span><span class="v" id="vRaw">–</span></div>
+    <div class="row"><span class="k">≈ PSA 9 (gut)</span><span class="v" id="v9">–</span></div>
+    <div class="row"><span class="k">≈ PSA 10 (gem)</span><span class="v" id="v10">–</span></div>
+    <div class="row"><span class="k">Gradings-Kosten (PSA + Versand ca.)</span><span class="v">~23 €</span></div>
+    <div class="okbox" id="vVerdict" style="display:none"></div>
+  </div>
+  <button class="act" id="btnSave">💾 Karte speichern</button>
+  <button class="ghost" id="btnDiscard">Verwerfen / Neue Karte</button>
+</section>
+
+<!-- ============ LISTE ============ -->
+<section class="screen" id="scr-list">
+  <div class="panel">
+    <h2>Gescannte Karten</h2>
+    <div class="mut" id="sumTxt"></div>
+    <button class="ghost" id="btnCsv">⬇ CSV exportieren</button>
+    <button class="ghost" id="btnClear" style="color:var(--bad)">🗑 Alle löschen</button>
+    <div id="listCards"></div>
+  </div>
+</section>
+
+<!-- ============ EINSTELLUNGEN ============ -->
+<section class="screen" id="scr-set">
+  <div class="panel">
+    <h2>PokemonTCG.io API-Key</h2>
+    <div class="mut">Kostenlos: auf <b>dev.pokemontcg.io</b> registrieren (2 Min.), Key hier einfügen. Ohne Key keine Wertsuche.</div>
+    <div class="setline"><input type="text" id="inpKey" placeholder="API-Key"><button class="ghost" style="width:auto;margin:0" id="btnKeySave">OK</button></div>
+  </div>
+  <div class="panel">
+    <h2>So bekommst Du die App aufs Handy</h2>
+    <div class="mut">1. App-URL im Chrome (Android) öffnen.<br>2. Menü ⋮ → „Zum Startbildschirm hinzufügen".<br>3. App-Icon erscheint, volle Größe, offline nutzbar (Scan + Analyse). Wertsuche braucht Internet.</div>
+  </div>
+  <div class="panel">
+    <h2>Grade-Skala</h2>
+    <div class="mut">10 Gem Mint · 9 Mint · 8 NM · 7 EX · 6 VG-EX · darunter kein Gradings- wirtschaftlicher Sinn bei Standardkarten.</div>
+  </div>
+</section>
+
+</main>
+<nav>
+  <button data-s="scan" class="active"><svg viewBox="0 0 24 24"><path d="M4 7V4h3M17 4h3v3M20 17v3h-3M7 20H4v-3M3 12h18"/></svg>Scan</button>
+  <button data-s="list"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>Liste</button>
+  <button data-s="set"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>Setup</button>
+</nav>
+<canvas id="work"></canvas>
+<canvas id="work2"></canvas>
+<div id="toast" style="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#000c;color:#fff;padding:10px 18px;border-radius:20px;font-size:14px;z-index:50;display:none"></div>
+
+<script>
+'use strict';
+const SKEY='cardgrader_v1';
+let DB={cards:[],settings:{apiKey:''}};
+try{const s=localStorage.getItem(SKEY);if(s)DB=JSON.parse(s);}catch(e){}
+function save(){localStorage.setItem(SKEY,JSON.stringify(DB));}
+
+// ---------- helpers ----------
+const $=id=>document.getElementById(id);
+function toast(m){const t=$('toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',2200);}
+function eur(v){return v==null?'–':v.toLocaleString('de-DE',{style:'currency',currency:'EUR'});}
+function esc(s){return String(s).replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));}
+function nav(s){document.querySelectorAll('.screen').forEach(e=>e.classList.remove('active'));
+  document.getElementById('scr-'+s).classList.add('active');
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.s===s));
+  if(s==='scan')startCam();else stopCam();}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>nav(b.dataset.s));
+
+// ---------- camera ----------
+let stream=null,shotMode='front';
+async function startCam(){
+  try{
+    if(stream) return;
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1440}}});
+    $('cam').srcObject=stream;
+    $('camErr').style.display='none';
+  }catch(e){
+    $('camErr').style.display='block';
+    $('camErr').textContent='Kamera nicht verfügbar: '+e.message+' → Foto aus Galerie wählen.';
+  }
+}
+function stopCam(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}}
+
+// ---------- current card state ----------
+let cur=null; // {front, back, thumb, quality, centering, cardId, ...}
+function newCard(){return{id:Date.now()+''+Math.floor(Math.random()*999),ts:Date.now(),front:null,back:null,thumb:null,quality:null,centering:null,flaws:{},cardId:null,cardName:'',cardSet:'',cardNum:'',priceRaw:null,price9:null,price10:null,grade:null};}
+cur=newCard();
+
+function drawToCanvas(img){const c=$('work');const M=1200;const sc=Math.min(1,M/Math.max(img.width,img.height));
+  c.width=img.width*sc;c.height=img.height*sc;c.getContext('2d').drawImage(img,0,0,c.width,c.height);return c;}
+
+function loadImg(dataUrl){return new Promise(res=>{const i=new Image();i.onload=()=>res(i);i.src=dataUrl;});}
+
+async function acceptImage(dataUrl,side){
+  cur[side]=dataUrl;
+  const img=await loadImg(dataUrl);
+  const c=drawToCanvas(img);
+  if(side==='front'){
+    cur.quality=analyzeQuality(c);
+    cur.centering=analyzeCentering(c,img);
+    const t=$('work2');t.width=240;t.height=240*Math.round(c.height/c.width*100)/100;
+    const th=document.createElement('canvas');const s=Math.min(1,256/Math.max(img.width,img.height));
+    th.width=img.width*s;th.height=img.height*s;th.getContext('2d').drawImage(img,0,0,th.width,th.height);
+    cur.thumb=th.toDataURL('image/jpeg',0.7);
+    cur.grade=estimate(cur);
+    renderCard();
+    nav('card');
+  }
+  $('btnBack').textContent=cur.back?'✅ Rückseite gespeichert — nochmal aufnehmen?':'🔄 Rückseite fotografieren';
+}
+
+// ---------- analysis ----------
+function analyzeQuality(c){
+  const ctx=c.getContext('2d');const d=ctx.getImageData(0,0,c.width,c.height).data;
+  const w=c.width,h=c.height;
+  // Laplacian variance (blur)
+  let sum=0,sum2=0,n=0;const gray=new Float32Array(w*h);
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=(y*w+x)*4;gray[y*w+x]=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];}
+  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){
+    const v=gray[y*w+x-1]+gray[y*w+x+1]+gray[(y-1)*w+x]+gray[(y+1)*w+x]-4*gray[y*w+x];
+    sum+=v;sum2+=v*v;n++;}
+  const mean=sum/n;const varr=sum2/n-mean*mean;
+  // glare: overexposed
+  let glare=0;for(let i=0;i<gray.length;i+=4)if(gray[i]>246)glare++;
+  glare/=gray.length/4;
+  // card fill: bright region bbox
+  let minX=w,maxX=0,minY=h,maxY=0,cnt=0;
+  for(let y=0;y<h;y+=3)for(let x=0;x<w;x+=3){
+    const i=(y*w+x)*4;const b=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+    if(b>130){cnt++;if(x<minX)minX=x;if(x>maxX)maxX=x;if(y<minY)minY=y;if(y>maxY)maxY=y;}}
+  let fill=0;
+  if(cnt>50){fill=((maxX-minX)*(maxY-minY))/(w*h);}
+  return{blur:Math.sqrt(varr),glare:Math.round(glare*1000)/10,fill:Math.round(fill*1000)/10};
+}
+
+function analyzeCentering(c,img){
+  const ctx=c.getContext('2d');const d=ctx.getImageData(0,0,c.width,c.height).data;
+  const w=c.width,h=c.height;
+  // find card bbox (bright rect)
+  let minX=w,maxX=0,minY=h,maxY=0;
+  for(let y=0;y<h;y+=2)for(let x=0;x<w;x+=2){
+    const i=(y*w+x)*4;const b=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+    if(b>120){if(x<minX)minX=x;if(x>maxX)maxX=x;if(y<minY)minY=y;if(y>maxY)maxY=y;}}
+  const cw=maxX-minX,ch=maxY-minY;
+  if(cw<0.3*w||ch<0.3*h)return{ok:false,lr:null,tb:null,box:null};
+  // artwork detection: columns/rows with high color variance vs uniform white border
+  const colS=new Float32Array(cw),rowS=new Float32Array(ch);
+  for(let y=minY;y<maxY;y++)for(let x=minX;x<maxX;x++){
+    const i=(y*w+x)*4;const mx=Math.max(d[i],d[i+1],d[i+2]),mn=Math.min(d[i],d[i+1],d[i+2]);
+    const sat=(mx>0?(mx-mn)/mx:0)+(mx>60?1:0); // saturation + darkness
+    colS[x-minX]+=sat;rowS[y-minY]+=sat;}
+  // normalize
+  for(let i=0;i<cw;i++)colS[i]/=ch;
+  for(let i=0;i<ch;i++)rowS[i]/=cw;
+  const cut=(a)=>{const m=a.reduce((s,v)=>s+v,0)/a.length;return a.map(v=>v>m*0.55?1:0);};
+  const lc=cut(colS),rc=cut(rowS);
+  const edges=(a)=>{let f=-1,l=-1;for(let i=0;i<a.length;i++){if(a[i]){if(f<0)f=i;l=i;}}return[f,l];};
+  const[af,al]=edges(lc),[rf,rl]=edges(rc);
+  if(af<0||rf<0)return{ok:false,lr:null,tb:null,box:[minX,minY,cw,ch]};
+  const bL=af,bR=cw-1-al,bT=rf,bB=ch-1-rl;
+  const lr=Math.min(bL,bR)/Math.max(bL,bR)*100;
+  const tb=Math.min(bT,bB)/Math.max(bT,bB)*100;
+  return{ok:true,lr:Math.round(lr),tb:Math.round(tb),box:[minX,minY,cw,ch],art:[af,minY+rf,al-af,rl-rf]};
+}
+
+function estimate(cur){
+  if(!cur.quality)return null;
+  const q=cur.quality,c=cur.centering,f=cur.flaws;
+  let centering=10;
+  if(c&&c.ok){
+    const m=Math.min(c.lr,c.tb);
+    if(m>=55)centering=10;else if(m>=52)centering=9;else if(m>=48)centering=8;else if(m>=40)centering=7;else centering=6;
+  }else centering=null; // unknown → don't penalize
+  let edges=10,surf=10;
+  if(f.white)edges-=2.5;
+  if(f.corner)edges-=2;
+  if(f.bend)edges-=3.5;
+  if(f.scratch)surf-=3;
+  if(f.print)surf-=1.5;
+  if(f.shine)surf-=2;
+  if(q.glare>6)surf-=1;
+  edges=Math.max(3,edges);surf=Math.max(3,surf);
+  // photo quality gate
+  const photoBad=q.blur<8||q.glare>12||(q.fill!=null&&q.fill<50);
+  const subs=[centering,edges,surf].filter(v=>v!=null);
+  if(!subs.length)return null;
+  let g=Math.min(...subs);
+  // overall: worst subs matters, rounded
+  g=Math.round(g*2)/2;
+  g=Math.max(1,Math.min(10,g));
+  return{overall:g,centering,edges:Math.round(edges*10)/10,surf:Math.round(surf*10)/10,photoBad};
+}
+
+function gradeCls(g){return g>=9.5?'vgood':g>=8.5?'good':g>=7?'ok':'bad';}
+function gradeLabel(g){return g>=10?'GEM MINT':g>=9.5?'PSA 9.5-10':g>=9?'PSA 9':g>=8.5?'PSA 8-9':g>=8?'PSA 8':g>=7?'PSA 7':g>=6?'PSA 6-7':'ungrade /低';}
+
+// ---------- render card screen ----------
+function renderCard(){
+  const c=cur;
+  $('curName').textContent=c.cardName?`${c.cardName} — ${c.cardNum}`:c.back&&!c.front?'Neue Karte (Rückseite)':'Neue Karte';
+  // quality
+  if(c.quality){
+    const q=c.quality;
+    $('qBlur').textContent=q.blur>25?'sehr scharf':q.blur>12?'ok':q.blur>8?'matt':'unscharf ⚠';
+    $('qBlur').className='v '+(q.blur>8?'':'bad');
+    $('qGlare').textContent=q.glare<=2?'keine':q.glare<=6?'wenig':q.glare<=12?'mittel ⚠':'stark ⚠';
+    $('qGlare').className='v '+(q.glare<=6?'':'bad');
+    $('qFill').textContent=q.fill>=70?'✅ gut gefüllt':q.fill>=50?'grenzwertig':q.fill>0?'zu weit weg ⚠':'–';
+    $('qHint').textContent=(q.blur<=8?'→ Foto schärfer machen (Karte flach, genug Licht). ':'')+(q.fill<50&&q.fill>0?'→ Karte näher an die Kamera, Rahmen auf dem Foto. ':'')+(q.glare>6?'→ Karte etwas drehen/schief halten, Licht streuen.':'');
+  }
+  // centering overlay
+  if(c.centering&&c.centering.ok&&c.centering.box){
+    $('centerImg').src=c.thumb;
+    const cv=$('centerCv');const[cx,cy,cw,ch]=c.centering.box;
+    cv.width=cw;cv.height=ch;
+    const ctx=cv.getContext('2d');
+    ctx.clearRect(0,0,cv.width,cv.height);
+    if(c.centering.art){
+      const[ax,ay,aw,ah]=c.centering.art;
+      ctx.strokeStyle='#ffcc00';ctx.lineWidth=3;ctx.strokeRect(ax-cx,ay-cy,aw,ah);
+    }
+    $('cLR').textContent=c.centering.lr+' / 100';
+    $('cTB').textContent=c.centering.tb+' / 100';
+    $('cHint').textContent=(c.centering.lr>=55&&c.centering.tb>=55)?'✅ Centering im PSA-10-Bereich (55/45 Regel)':(c.centering.lr>=50?'Grenzbereich für PSA 9/10 — gelbe Box prüfen (Umriss der Grafik).':'Ausgeprägtes Off-Center → eher PSA 7-8. Gelbe Box = erkannter Grafikbereich; falsch erkannt? Dann Mängel manuell bewerten.');
+  }else{
+    $('cLR').textContent='–';$('cTB').textContent='–';
+    $('cHint').textContent='Nicht erkannt — Karte komplett + gerade fotografieren, hellere Umgebungslicht.';
+    const cv=$('centerCv');cv.width=0;cv.height=0;
+  }
+  // flaws
+  for(const k of['white','scratch','corner','bend','print','shine'])$('f_'+k).checked=!!c.flaws[k];
+  // grade
+  if(c.grade){
+    $('gradeNum').innerHTML=`<span class="${gradeCls(c.grade.overall)}">${c.grade.overall}</span><small> / 10</small>`;
+    $('gradeTxt').textContent=gradeLabel(c.grade.overall)+(c.grade.photoBad?' (Foto-Qualität grenzwertig — Wert unsicher)':'');
+    $('gC').textContent=c.grade.centering??'–';
+    $('gE').textContent=c.grade.edges;
+    $('gS').textContent=c.grade.surf;
+  }else{
+    $('gradeNum').textContent='–';$('gradeTxt').textContent='Foto nötig (Vorderseite).';
+    $('gC').textContent='–';$('gE').textContent='–';$('gS').textContent='–';
+  }
+  // value
+  $('vRaw').textContent=eur(c.priceRaw);
+  $('v9').textContent=eur(c.price9);
+  $('v10').textContent=eur(c.price10);
+  const vd=$('vVerdict');
+  if(c.priceRaw!=null){
+    const lo=c.priceRaw*0.9,hi=c.price10*1.1;
+    const cost=23;
+    if(c.grade&&c.grade.overall>=9&&c.price10>cost+c.priceRaw){
+      vd.style.display='block';vd.textContent=`💡 Gradings kann sich lohnen: Karte bei ${c.grade.overall}/10, PSA-10-Schätzung ${eur(c.price10)} vs. Kosten ~${cost} € + Versand.`;
+    }else if(c.grade&&c.grade.overall>=8.5&&c.price10>cost*2){
+      vd.style.display='block';vd.textContent='🤔 Grenzfall: Nur lohnend, wenn Karte wirklich PSA 9-10 erreicht.';
+    }else{
+      vd.style.display='block';vd.className='warnbox';
+      vd.textContent='❌ Gradings lohnt sich eher nicht: Kartenwert zu niedrig gegenüber ~23 € Gebühr+Versand, oder expected Grade < 9.';
+      vd.className='warnbox';
+    }
+  }else{vd.style.display='none';}
+}
+
+// ---------- flaws events ----------
+for(const k of['white','scratch','corner','bend','print','shine']){
+  $('f_'+k).onchange=e=>{cur.flaws[k]=e.target.checked;cur.grade=estimate(cur);renderCard();};
+}
+
+// ---------- capture ----------
+$('btnShot').onclick=()=>shotMode='front',$('btnShot').onclick=()=>{shotMode='front';snap();};
+$('btnBack').onclick=()=>{shotMode='back';snap();};
+function snap(){
+  const v=$('cam');
+  if(!stream||!v.videoWidth){toast('Kamera nicht aktiv — Foto aus Galerie wählen.');return;}
+  const c=document.createElement('canvas');
+  c.width=v.videoWidth;c.height=v.videoHeight;
+  c.getContext('2d').drawImage(v,0,0);
+  acceptImage(c.toDataURL('image/jpeg',0.9),shotMode);
+}
+$('btnPick').onclick=()=>{$('picker').value='';$('picker').click();};
+$('picker').onchange=e=>{
+  const f=e.target.files[0];if(!f)return;
+  const r=new FileReader();r.onload=()=>acceptImage(r.result,shotMode);r.readAsDataURL(f);
+};
+
+// ---------- save / discard ----------
+$('btnSave').onclick=()=>{
+  cur.grade=estimate(cur);
+  DB.cards=DB.cards.filter(x=>x.id!==cur.id);
+  DB.cards.unshift(cur);save();
+  toast('Karte gespeichert.');
+  cur=newCard();$('results').innerHTML='';$('vRaw').textContent='–';$('v9').textContent='–';$('v10').textContent='–';
+  renderBatch();nav('scan');
+};
+$('btnDiscard').onclick=()=>{cur=newCard();$('results').innerHTML='';nav('scan');};
+
+// ---------- batch list (scan screen) ----------
+function renderBatch(){
+  $('hdrCount').textContent=DB.cards.length+' Karten';
+  const l=$('batchList');l.innerHTML='';
+  DB.cards.slice(0,12).forEach(c=>{
+    const d=document.createElement('div');d.className='cc';
+    d.innerHTML=`<img src="${c.thumb||''}"><div style="font-size:12px">${c.grade?c.grade.overall+'/10':'–'}<br><span class="mut">${c.priceRaw!=null?eur(c.priceRaw):'kein Wert'}</span></div>`;
+    d.onclick=()=>{cur=c;renderCard();nav('card');};
+    l.appendChild(d);
+  });
+}
+
+// ---------- API ----------
+async function apiSearch(q){
+  const key=DB.settings.apiKey;
+  if(!key){toast('Kein API-Key — Setup → dev.pokemontcg.io');return[];}
+  const url=`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&pageSize=12&orderBy=-set.releaseDate`;
+  const r=await fetch(url,{headers:{'X-Api-Key':key}});
+  if(!r.ok){toast('API-Fehler '+r.status);return[];}
+  const j=await r.json();
+  return j.data||[];
+}
+$('btnSearch').onclick=async()=>{
+  const q=$('q').value.trim();if(!q)return;
+  $('results').innerHTML='<div class="mut">Suche…</div>';
+  const cards=await apiSearch(q);
+  const box=$('results');box.innerHTML='';
+  if(!cards.length){box.innerHTML='<div class="mut">Keine Treffer.</div>';return;}
+  cards.forEach(c=>{
+    const cm=c.cardmarket&&c.cardmarket.prices?c.cardmarket.prices.trendPrice:null;
+    const tc=c.tcgplayer&&c.tcgplayer.prices&&c.tcgplayer.prices.normal?c.tcgplayer.prices.normal.market:null;
+    const d=document.createElement('div');d.className='res';
+    d.innerHTML=`<img src="${c.images.small}" loading="lazy"><div class="t"><b>${esc(c.name)}</b>${esc(c.set.name)} · #${esc(c.number||'')}</div><div class="p">CM ${cm!=null?cm.toFixed(2)+' €':'–'}${tc?'<br>TCG $'+tc:''}</div>`;
+    d.onclick=()=>{
+      cur.cardId=c.id;cur.cardName=c.name;cur.cardSet=c.set.name;cur.cardNum=c.number;
+      const trend=cm!=null?cm:(tc!=null?tc*0.93:null);
+      cur.priceRaw=trend!=null?Math.round(trend*100)/100:null;
+      cur.price9=cur.priceRaw!=null?Math.round(cur.priceRaw*1.5*100)/100:null;
+      cur.price10=cur.priceRaw!=null?Math.round(cur.priceRaw*2.5*100)/100:null;
+      cur.grade=estimate(cur);
+      renderCard();
+    };
+    box.appendChild(d);
+  });
+};
+
+// ---------- list screen ----------
+function renderList(){
+  const box=$('listCards');box.innerHTML='';
+  const cs=[...DB.cards].sort((a,b)=>(b.priceRaw||0)-(a.priceRaw||0));
+  let sum=0,cnt=0,cntWorth=0;
+  cs.forEach(c=>{
+    sum+=c.priceRaw||0;cnt++;
+    if(c.grade&&c.grade.overall>=9&&(c.price10||0)>23+(c.priceRaw||0))cntWorth++;
+    const cls=c.grade?gradeCls(c.grade.overall):'';
+    const d=document.createElement('div');d.className='res';
+    d.innerHTML=`<img src="${c.thumb||''}"><div class="t"><b>${esc(c.cardName||'Unbenannt')}</b>${esc(c.cardSet||'')}<br><span class="mut">${c.grade?c.grade.overall+'/10':'kein Foto'}</span></div><div class="p"><span class="${cls}">${c.grade?c.grade.overall:''}</span><br>${c.priceRaw!=null?eur(c.priceRaw):'–'}</div>`;
+    d.onclick=()=>{cur=c;renderCard();nav('card');};
+    box.appendChild(d);
+  });
+  $('sumTxt').textContent=`${cnt} Karten · Summe ungraded ${eur(sum)} · ${cntWorth} Karten mit Gradings-Potenzial`;
+  if(!cnt)box.innerHTML='<div class="mut">Noch keine Karten gescannt.</div>';
+}
+$('btnCsv').onclick=()=>{
+  const rows=[['Datum','Name','Set','Nummer','Grade-Schätzung','Cardmarket €','PSA9 €','PSA10 €','Centering LR','Centering TB','Whitening','Kratzer','Ecken','Biegung','Printlinien','Glanz']];
+  DB.cards.forEach(c=>rows.push([
+    new Date(c.ts).toISOString().slice(0,10),c.cardName||'',c.cardSet||'',c.cardNum||'',
+    c.grade?c.grade.overall:'',c.priceRaw??'',c.price9??'',c.price10??'',
+    c.centering?.lr??'',c.centering?.tb??'',
+    c.flaws.white?'ja':'',c.flaws.scratch?'ja':'',c.flaws.corner?'ja':'',c.flaws.bend?'ja':'',c.flaws.print?'ja':'',c.flaws.shine?'ja':'']));
+  const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(';')).join('\n');
+  const a=document.createElement('a');a.href='data:text/csv;charset=utf-8;base64,'+btoa('\ufeff'+csv);
+  a.download='cardgrader_export.csv';a.click();
+};
+$('btnClear').onclick=()=>{
+  if(confirm('Wirklich alle Karten löschen?')){DB.cards=[];save();renderList();renderBatch();}
+};
+
+// ---------- settings ----------
+$('inpKey').value=DB.settings.apiKey||'';
+$('btnKeySave').onclick=()=>{DB.settings.apiKey=$('inpKey').value.trim();save();toast('Key gespeichert.');};
+
+// ---------- SW ----------
+if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{});}
+
+// init
+renderBatch();
+if(DB.cards.length){renderList();}
+startCam();
+</script>
+</body>
+</html>
