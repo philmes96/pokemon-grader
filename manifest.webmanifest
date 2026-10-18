@@ -1,6 +1,6 @@
 {
-  "name": "CardGrader",
-  "short_name": "CardGrader",
+  "name": "Cheesegrader",
+  "short_name": "Cheesegrader",
   "description": "Pokémon-Karten scannen, Kondition und Wert bewerten, Gradings-Einschätzung PSA 7-10.",
   "start_url": "./index.html",
   "display": "standalone",

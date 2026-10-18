@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>CardGrader</title>
+<title>Cheesegrader</title>
 <link rel="manifest" href="manifest.webmanifest">
 <style>
 :root{--bg:#12141a;--card:#1c1f28;--fg:#e8eaf0;--mut:#8b90a0;--acc:#ffcc00;--ok:#3fbf6f;--warn:#e0a020;--bad:#e05555;--border:#2a2e3a}
@@ -62,16 +62,18 @@ canvas#work{display:none}
 </style>
 </head>
 <body>
-<header><h1>🃏 CardGrader</h1><span class="badge" id="hdrCount">0 Karten</span></header>
+<header><h1>🧀 Cheesegrader</h1><span class="badge" id="hdrCount">0 Karten</span></header>
 <main>
 
 <!-- ============ SCAN ============ -->
 <section class="screen active" id="scr-scan">
   <video id="cam" autoplay playsinline muted></video>
   <button class="act" id="btnShot">📸 Foto aufnehmen (Vorderseite)</button>
-  <button class="ghost" id="btnPick">📁 Foto aus Galerie wählen</button>
+  <button class="ghost" id="btnPickCam">📷 Mit Kamera-App aufnehmen</button>
+  <button class="ghost" id="btnPickGal">🖼️ Aus Galerie wählen</button>
   <button class="ghost" id="btnBack">🔄 Rückseite fotografieren</button>
-  <input type="file" id="picker" accept="image/*" capture="environment">
+  <input type="file" id="pickCam" accept="image/*" capture="environment">
+  <input type="file" id="pickGal" accept="image/*">
   <div class="warnbox" id="camErr" style="display:none"></div>
   <div class="panel">
     <h2>Batch</h2>
@@ -87,6 +89,13 @@ canvas#work{display:none}
     <h2>Karte identifizieren</h2>
     <div class="setline"><input type="search" id="q" placeholder="z.B. Charizard ex 199/197"><button class="ghost" style="width:auto;margin:0" id="btnSearch">Suchen</button></div>
     <div id="results"></div>
+  </div>
+  <div class="panel">
+    <h2>Karten-Details</h2>
+    <div class="row"><span class="k">Set</span><span class="v" id="iSet">–</span></div>
+    <div class="row"><span class="k">Nummer</span><span class="v" id="iNum">–</span></div>
+    <div class="row"><span class="k">Seltenheit</span><span class="v" id="iRar">–</span></div>
+    <div class="row"><span class="k">Release</span><span class="v" id="iDate">–</span></div>
   </div>
   <div class="panel">
     <h2>Foto-Qualität</h2>
@@ -208,7 +217,7 @@ let cur=null; // {front, back, thumb, quality, centering, cardId, ...}
 function newCard(){return{id:Date.now()+''+Math.floor(Math.random()*999),ts:Date.now(),front:null,back:null,thumb:null,quality:null,centering:null,flaws:{},cardId:null,cardName:'',cardSet:'',cardNum:'',priceRaw:null,price9:null,price10:null,grade:null};}
 cur=newCard();
 
-function drawToCanvas(img){const c=$('work');const M=1200;const sc=Math.min(1,M/Math.max(img.width,img.height));
+function drawToCanvas(img){const c=$('work');const M=2000;const sc=Math.min(1,M/Math.max(img.width,img.height));
   c.width=img.width*sc;c.height=img.height*sc;c.getContext('2d').drawImage(img,0,0,c.width,c.height);return c;}
 
 function loadImg(dataUrl){return new Promise(res=>{const i=new Image();i.onload=()=>res(i);i.src=dataUrl;});}
@@ -221,9 +230,9 @@ async function acceptImage(dataUrl,side){
     cur.quality=analyzeQuality(c);
     cur.centering=analyzeCentering(c,img);
     const t=$('work2');t.width=240;t.height=240*Math.round(c.height/c.width*100)/100;
-    const th=document.createElement('canvas');const s=Math.min(1,256/Math.max(img.width,img.height));
+    const th=document.createElement('canvas');const s=Math.min(1,512/Math.max(img.width,img.height));
     th.width=img.width*s;th.height=img.height*s;th.getContext('2d').drawImage(img,0,0,th.width,th.height);
-    cur.thumb=th.toDataURL('image/jpeg',0.7);
+    cur.thumb=th.toDataURL('image/jpeg',0.85);
     cur.grade=estimate(cur);
     renderCard();
     nav('card');
@@ -320,6 +329,10 @@ function gradeLabel(g){return g>=10?'GEM MINT':g>=9.5?'PSA 9.5-10':g>=9?'PSA 9':
 function renderCard(){
   const c=cur;
   $('curName').textContent=c.cardName?`${c.cardName} — ${c.cardNum}`:c.back&&!c.front?'Neue Karte (Rückseite)':'Neue Karte';
+  $('iSet').textContent=c.cardSet||'–';
+  $('iNum').textContent=c.cardNum||'–';
+  $('iRar').textContent=c.cardRarity||'–';
+  $('iDate').textContent=c.cardDate||'–';
   // quality
   if(c.quality){
     const q=c.quality;
@@ -392,17 +405,22 @@ $('btnShot').onclick=()=>shotMode='front',$('btnShot').onclick=()=>{shotMode='fr
 $('btnBack').onclick=()=>{shotMode='back';snap();};
 function snap(){
   const v=$('cam');
-  if(!stream||!v.videoWidth){toast('Kamera nicht aktiv — Foto aus Galerie wählen.');return;}
+  if(!stream||!v.videoWidth){toast('Kamera nicht aktiv — Kamera-App oder Galerie nutzen.');return;}
   const c=document.createElement('canvas');
   c.width=v.videoWidth;c.height=v.videoHeight;
   c.getContext('2d').drawImage(v,0,0);
   acceptImage(c.toDataURL('image/jpeg',0.9),shotMode);
 }
-$('btnPick').onclick=()=>{$('picker').value='';$('picker').click();};
-$('picker').onchange=e=>{
-  const f=e.target.files[0];if(!f)return;
-  const r=new FileReader();r.onload=()=>acceptImage(r.result,shotMode);r.readAsDataURL(f);
-};
+function pickHandler(){
+  return e=>{
+    const f=e.target.files[0];if(!f)return;
+    const r=new FileReader();r.onload=()=>acceptImage(r.result,shotMode);r.readAsDataURL(f);
+  };
+}
+$('btnPickCam').onclick=()=>{$('pickCam').value='';$('pickCam').click();};
+$('btnPickGal').onclick=()=>{$('pickGal').value='';$('pickGal').click();};
+$('pickCam').onchange=pickHandler();
+$('pickGal').onchange=pickHandler();
 
 // ---------- save / discard ----------
 $('btnSave').onclick=()=>{
@@ -447,9 +465,11 @@ $('btnSearch').onclick=async()=>{
     const cm=c.cardmarket&&c.cardmarket.prices?c.cardmarket.prices.trendPrice:null;
     const tc=c.tcgplayer&&c.tcgplayer.prices&&c.tcgplayer.prices.normal?c.tcgplayer.prices.normal.market:null;
     const d=document.createElement('div');d.className='res';
-    d.innerHTML=`<img src="${c.images.small}" loading="lazy"><div class="t"><b>${esc(c.name)}</b>${esc(c.set.name)} · #${esc(c.number||'')}</div><div class="p">CM ${cm!=null?cm.toFixed(2)+' €':'–'}${tc?'<br>TCG $'+tc:''}</div>`;
+    const rar=c.rarity?` · ${esc(c.rarity)}`:'';
+    d.innerHTML=`<img src="${c.images.small}" loading="lazy"><div class="t"><b>${esc(c.name)}</b>${esc(c.set.name)} · #${esc(c.number||'')}${rar}</div><div class="p">CM ${cm!=null?cm.toFixed(2)+' €':'–'}${tc?'<br>TCG $'+tc:''}</div>`;
     d.onclick=()=>{
       cur.cardId=c.id;cur.cardName=c.name;cur.cardSet=c.set.name;cur.cardNum=c.number;
+      cur.cardRarity=c.rarity||'';cur.cardDate=(c.set&&c.set.releaseDate)||'';
       const trend=cm!=null?cm:(tc!=null?tc*0.93:null);
       cur.priceRaw=trend!=null?Math.round(trend*100)/100:null;
       cur.price9=cur.priceRaw!=null?Math.round(cur.priceRaw*1.5*100)/100:null;
@@ -479,15 +499,15 @@ function renderList(){
   if(!cnt)box.innerHTML='<div class="mut">Noch keine Karten gescannt.</div>';
 }
 $('btnCsv').onclick=()=>{
-  const rows=[['Datum','Name','Set','Nummer','Grade-Schätzung','Cardmarket €','PSA9 €','PSA10 €','Centering LR','Centering TB','Whitening','Kratzer','Ecken','Biegung','Printlinien','Glanz']];
+  const rows=[['Datum','Name','Set','Nummer','Seltenheit','Release','Grade-Schätzung','Cardmarket €','PSA9 €','PSA10 €','Centering LR','Centering TB','Whitening','Kratzer','Ecken','Biegung','Printlinien','Glanz']];
   DB.cards.forEach(c=>rows.push([
-    new Date(c.ts).toISOString().slice(0,10),c.cardName||'',c.cardSet||'',c.cardNum||'',
+    new Date(c.ts).toISOString().slice(0,10),c.cardName||'',c.cardSet||'',c.cardNum||'',c.cardRarity||'',c.cardDate||'',
     c.grade?c.grade.overall:'',c.priceRaw??'',c.price9??'',c.price10??'',
     c.centering?.lr??'',c.centering?.tb??'',
     c.flaws.white?'ja':'',c.flaws.scratch?'ja':'',c.flaws.corner?'ja':'',c.flaws.bend?'ja':'',c.flaws.print?'ja':'',c.flaws.shine?'ja':'']));
   const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(';')).join('\n');
   const a=document.createElement('a');a.href='data:text/csv;charset=utf-8;base64,'+btoa('\ufeff'+csv);
-  a.download='cardgrader_export.csv';a.click();
+  a.download='cheesegrader_export.csv';a.click();
 };
 $('btnClear').onclick=()=>{
   if(confirm('Wirklich alle Karten löschen?')){DB.cards=[];save();renderList();renderBatch();}
