@@ -8,14 +8,15 @@
 <style>
 :root{--bg:#12141a;--card:#1c1f28;--fg:#e8eaf0;--mut:#8b90a0;--acc:#ffcc00;--ok:#3fbf6f;--warn:#e0a020;--bad:#e05555;--border:#2a2e3a}
 *{box-sizing:border-box;margin:0}
-body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,sans-serif;font-size:15px;padding-bottom:70px}
+body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,sans-serif;font-size:15px;padding-bottom:24px}
 header{position:fixed;top:0;left:0;right:0;background:var(--card);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:10px 14px;z-index:10}
 header h1{font-size:17px;font-weight:700;flex:1}
 header .badge{font-size:12px;color:var(--mut)}
-nav{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--border);display:flex;z-index:10}
-nav button{flex:1;background:none;border:none;color:var(--mut);padding:12px 0 14px;font-size:11px;display:flex;flex-direction:column;align-items:center;gap:3px}
-nav button.active{color:var(--acc)}
-nav button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2}
+.mbtn{background:none;border:none;color:var(--fg);font-size:24px;padding:0 4px;cursor:pointer;line-height:1}
+.menu{position:fixed;top:52px;right:10px;background:var(--card);border:1px solid var(--border);border-radius:10px;z-index:40;overflow:hidden;box-shadow:0 6px 20px #000a;display:flex;flex-direction:column}
+.menu button{background:none;border:none;color:var(--fg);padding:13px 26px;font-size:14px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap}
+.menu button:last-child{border-bottom:none}
+.menu button.active{color:var(--acc)}
 main{padding:64px 14px 20px;max-width:640px;margin:0 auto}
 .screen{display:none}.screen.active{display:block}
 button.act{background:var(--acc);color:#111;border:none;border-radius:8px;padding:12px 18px;font-size:15px;font-weight:600;width:100%;margin:8px 0}
@@ -52,17 +53,17 @@ input[type=range]{width:100%}
 .hidden{display:none!important}
 .setline{display:flex;gap:8px;margin-top:8px}
 .setline input{flex:1}
-#picker{display:none}
+#pickCam,#pickGal{display:none}
 canvas#work{display:none}
 .center-img{position:relative;width:100%;background:#000;border-radius:12px;overflow:hidden}
 .center-img img{width:100%;display:block}
-.center-img canvas{position:absolute;inset:0;width:100%;height:100%}
+
 .big{font-size:18px;font-weight:700}
 .dl{text-align:center;margin-top:10px}
 </style>
 </head>
 <body>
-<header><h1>🧀 Cheesegrader</h1><span class="badge" id="hdrCount">0 Karten</span></header>
+<header><h1>🧀 Cheesegrader</h1><span class="badge" id="hdrCount">0 Karten</span><button id="menuBtn" class="mbtn" aria-label="Menü">☰</button></header>
 <main>
 
 <!-- ============ SCAN ============ -->
@@ -113,7 +114,7 @@ canvas#work{display:none}
   </div>
   <div class="panel">
     <h2>Centering (automatisch, grob)</h2>
-    <div class="center-img"><img id="centerImg"><canvas id="centerCv"></canvas></div>
+    <div class="center-img"><img id="centerImg" alt="Kartenfoto"></div>
     <div class="row"><span class="k">Horizontal L : R</span><span class="v" id="cLR">–</span></div>
     <div class="row"><span class="k">Vertikal O : U</span><span class="v" id="cTB">–</span></div>
     <div class="mut" id="cHint"></div>
@@ -138,14 +139,12 @@ canvas#work{display:none}
   </div>
   <div class="panel" id="valPanel">
     <h2>Wert</h2>
-    <div class="row"><span class="k">Cardmarket (ungraded, Trend)</span><span class="v" id="vRaw">–</span></div>
-    <div class="row"><span class="k">Karten-Sprache</span><span class="v"><select id="cmLang" style="background:#12141a;color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:6px;font-size:14px">
-      <option value="3" selected>Deutsch</option><option value="1">Englisch</option><option value="2">Französisch</option><option value="4">Spanisch</option><option value="5">Italienisch</option><option value="7">Japanisch</option></select></span></div>
+    <div class="row"><span class="k">Marktwert (TCGPlayer, EUR)</span><span class="v" id="vRaw">–</span></div>
     <div class="row"><span class="k">≈ PSA 9 (gut)</span><span class="v" id="v9">–</span></div>
     <div class="row"><span class="k">≈ PSA 10 (gem)</span><span class="v" id="v10">–</span></div>
     <div class="row"><span class="k">Gradings-Kosten (PSA + Versand ca.)</span><span class="v">~23 €</span></div>
     <div class="okbox" id="vVerdict" style="display:none"></div>
-    <button class="ghost" id="btnCm" style="display:none">🔗 Cardmarket-Seite öffnen (Preis-Graph gegenprüfen)</button>
+    <button class="ghost" id="btnCm" style="display:none">🔗 Auf Cardmarket suchen (Preis-Graph gegenprüfen)</button>
     <div class="mut" id="cmHint"></div>
   </div>
   <button class="act" id="btnSave">💾 Karte speichern</button>
@@ -166,9 +165,8 @@ canvas#work{display:none}
 <!-- ============ EINSTELLUNGEN ============ -->
 <section class="screen" id="scr-set">
   <div class="panel">
-    <h2>PokemonTCG.io API-Key</h2>
-    <div class="mut">Kostenlos: auf <b>dev.pokemontcg.io</b> registrieren (2 Min.), Key hier einfügen. Ohne Key keine Wertsuche.</div>
-    <div class="setline"><input type="text" id="inpKey" placeholder="API-Key"><button class="ghost" style="width:auto;margin:0" id="btnKeySave">OK</button></div>
+    <h2>Datenquellen</h2>
+    <div class="mut">Karten-Daten: <b>TCGdex</b> (kostenlos, kein Account nötig). Preise: <b>TCGCSV/TCGPlayer</b> (USD, automatisch in EUR umgerechnet, Wechselkurs täglich aktualisiert). Cardmarket-Preise sind ohne Login nicht abrufbar — dafür gibt's den Direkt-Such-Button.</div>
   </div>
   <div class="panel">
     <h2>So bekommst Du die App aufs Handy</h2>
@@ -181,11 +179,11 @@ canvas#work{display:none}
 </section>
 
 </main>
-<nav>
-  <button data-s="scan" class="active"><svg viewBox="0 0 24 24"><path d="M4 7V4h3M17 4h3v3M20 17v3h-3M7 20H4v-3M3 12h18"/></svg>Scan</button>
-  <button data-s="list"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>Liste</button>
-  <button data-s="set"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>Setup</button>
-</nav>
+<div id="menu" class="menu hidden">
+  <button data-s="scan" class="active">📷 Scannen</button>
+  <button data-s="list">📋 Verlauf &amp; Liste</button>
+  <button data-s="set">⚙️ Setup</button>
+</div>
 <canvas id="work"></canvas>
 <canvas id="work2"></canvas>
 <div id="toast" style="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#000c;color:#fff;padding:10px 18px;border-radius:20px;font-size:14px;z-index:50;display:none"></div>
@@ -204,9 +202,13 @@ function eur(v){return v==null?'–':v.toLocaleString('de-DE',{style:'currency',
 function esc(s){return String(s).replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));}
 function nav(s){document.querySelectorAll('.screen').forEach(e=>e.classList.remove('active'));
   document.getElementById('scr-'+s).classList.add('active');
-  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.s===s));
+  document.querySelectorAll('#menu button').forEach(b=>b.classList.toggle('active',b.dataset.s===s));
+  const m=$('menu');if(m)m.classList.add('hidden');
   if(s==='scan')startCam();else stopCam();}
-document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>nav(b.dataset.s));
+const _menu=$('menu');
+document.querySelectorAll('#menu button').forEach(b=>b.onclick=()=>nav(b.dataset.s));
+$('menuBtn').onclick=e=>{_menu.classList.toggle('hidden');e.stopPropagation();};
+document.addEventListener('click',e=>{if(_menu&&!_menu.classList.contains('hidden')&&!_menu.contains(e.target)&&e.target.id!=='menuBtn')_menu.classList.add('hidden');});
 
 // ---------- camera ----------
 let stream=null,shotMode='front';
@@ -218,7 +220,7 @@ async function startCam(){
     $('camErr').style.display='none';
   }catch(e){
     $('camErr').style.display='block';
-    $('camErr').textContent='Kamera nicht verfügbar: '+e.message+' → Foto aus Galerie wählen.';
+    $('camErr').textContent='Kamera nicht verfügbar: '+e.message+' → Button „Mit Kamera-App aufnehmen“ oder „Aus Galerie wählen“ nutzen.';
   }
 }
 function stopCam(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}}
@@ -240,10 +242,25 @@ async function acceptImage(dataUrl,side){
   if(side==='front'){
     cur.quality=analyzeQuality(c);
     cur.centering=analyzeCentering(c,img);
-    const t=$('work2');t.width=240;t.height=240*Math.round(c.height/c.width*100)/100;
-    const th=document.createElement('canvas');const s=Math.min(1,512/Math.max(img.width,img.height));
+    // sharp display image (max 1000px, minimal recompression)
+    const dsp=document.createElement('canvas');const ds=Math.min(1,1000/Math.max(img.width,img.height));
+    dsp.width=img.width*ds;dsp.height=img.height*ds;
+    dsp.getContext('2d').drawImage(img,0,0,dsp.width,dsp.height);
+    cur.disp=dsp.toDataURL('image/jpeg',0.92);
+    // small thumb for lists
+    const th=document.createElement('canvas');const s=Math.min(1,256/Math.max(img.width,img.height));
     th.width=img.width*s;th.height=img.height*s;th.getContext('2d').drawImage(img,0,0,th.width,th.height);
-    cur.thumb=th.toDataURL('image/jpeg',0.85);
+    cur.thumb=th.toDataURL('image/jpeg',0.8);
+    // annotated centering image (full display res + artwork overlay)
+    if(cur.centering&&cur.centering.ok&&cur.centering.box){
+      const ann=document.createElement('canvas');const as=Math.min(1,1000/Math.max(img.width,img.height));
+      ann.width=dsp.width;ann.height=dsp.height;
+      const ax2=ann.getContext('2d');ax2.drawImage(img,0,0,ann.width,ann.height);
+      const k=ann.width/c.width;
+      const art=cur.centering.art;
+      if(art){ax2.strokeStyle='#ffcc00';ax2.lineWidth=Math.max(3,Math.round(5*k));ax2.strokeRect(art[0]*k,art[1]*k,art[2]*k,art[3]*k);}
+      cur.anno=ann.toDataURL('image/jpeg',0.92);
+    }else cur.anno=null;
     cur.grade=estimate(cur);
     renderCard();
     nav('card');
@@ -345,10 +362,9 @@ function renderCard(){
   $('iRar').textContent=c.cardRarity||'–';
   $('iDate').textContent=c.cardDate||'–';
   const bt=$('btnCm');
-  if(c.cmUrl){bt.style.display='block';bt.onclick=()=>window.open(c.cmUrl+'?language='+$('cmLang').value,'_blank');}
+  if(c.cmUrl){bt.style.display='block';bt.onclick=()=>window.open(c.cmUrl,'_blank');}
   else{bt.style.display='none';}
-  if(c.cmLang)$('cmLang').value=c.cmLang;else $('cmLang').value=DB.settings.lang||'3';
-  $('cmHint').textContent=c.cmUrl?'Trend-Preis = alle Sprachen/Konditionen. Button öffnet Cardmarket mit Sprachfilter (Standort Deutschland).':''; 
+  $('cmHint').textContent=c.cmUrl?'Preis = TCGPlayer-Marktwert (USD\u2192EUR umgerechnet). Cardmarket-Preise gehen ohne Login nicht \u2014 Button f\u00fchrt zur CM-Suche mit Preis-Graph.':''; 
   const dn=$('dupNote');
   if(c.dupNote){dn.style.display='block';dn.textContent='🔁 '+c.dupNote;}else dn.style.display='none';
   // quality
@@ -363,22 +379,14 @@ function renderCard(){
   }
   // centering overlay
   if(c.centering&&c.centering.ok&&c.centering.box){
-    $('centerImg').src=c.thumb;
-    const cv=$('centerCv');const[cx,cy,cw,ch]=c.centering.box;
-    cv.width=cw;cv.height=ch;
-    const ctx=cv.getContext('2d');
-    ctx.clearRect(0,0,cv.width,cv.height);
-    if(c.centering.art){
-      const[ax,ay,aw,ah]=c.centering.art;
-      ctx.strokeStyle='#ffcc00';ctx.lineWidth=3;ctx.strokeRect(ax-cx,ay-cy,aw,ah);
-    }
+    $('centerImg').src=c.anno||c.disp||c.thumb;
     $('cLR').textContent=c.centering.lr+' / 100';
     $('cTB').textContent=c.centering.tb+' / 100';
     $('cHint').textContent=(c.centering.lr>=55&&c.centering.tb>=55)?'✅ Centering im PSA-10-Bereich (55/45 Regel)':(c.centering.lr>=50?'Grenzbereich für PSA 9/10 — gelbe Box prüfen (Umriss der Grafik).':'Ausgeprägtes Off-Center → eher PSA 7-8. Gelbe Box = erkannter Grafikbereich; falsch erkannt? Dann Mängel manuell bewerten.');
   }else{
+    $('centerImg').src=c.disp||c.thumb||'';
     $('cLR').textContent='–';$('cTB').textContent='–';
-    $('cHint').textContent='Nicht erkannt — Karte komplett + gerade fotografieren, hellere Umgebungslicht.';
-    const cv=$('centerCv');cv.width=0;cv.height=0;
+    $('cHint').textContent='Nicht erkannt — Karte komplett + gerade fotografieren, helleres Umgebungslicht.';
   }
   // flaws
   for(const k of['white','scratch','corner','bend','print','shine'])$('f_'+k).checked=!!c.flaws[k];
@@ -417,7 +425,7 @@ function renderCard(){
 for(const k of['white','scratch','corner','bend','print','shine']){
   $('f_'+k).onchange=e=>{cur.flaws[k]=e.target.checked;cur.grade=estimate(cur);renderCard();};
 }
-$('cmLang').onchange=e=>{cur.cmLang=e.target.value;DB.settings.lang=e.target.value;save();};
+
 
 // ---------- capture ----------
 $('btnShot').onclick=()=>shotMode='front',$('btnShot').onclick=()=>{shotMode='front';snap();};
@@ -488,40 +496,81 @@ $('btnHistClear').onclick=()=>{
   if(confirm('Wirklich den gesamten Verlauf löschen?')){DB.cards=[];save();renderHist();renderBatch();renderList();}
 };
 
-// ---------- API ----------
-async function apiSearch(q){
-  const key=DB.settings.apiKey;
-  if(!key){toast('Kein API-Key — Setup → dev.pokemontcg.io');return[];}
-  const url=`https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q)}&pageSize=12&orderBy=-set.releaseDate`;
-  const r=await fetch(url,{headers:{'X-Api-Key':key}});
-  if(!r.ok){toast('API-Fehler '+r.status);return[];}
+// ---------- API (keyless: TCGdex für Karten, TCGCSV für TCGPlayer-Preise) ----------
+async function tgGroups(){
+  if(DB.settings.groupsCache&&Date.now()-DB.settings.groupsCache.ts<7*864e5)return DB.settings.groupsCache.data;
+  const r=await fetch('https://tcgcsv.com/tcgplayer/3/groups');
   const j=await r.json();
-  return j.data||[];
+  DB.settings.groupsCache={ts:Date.now(),data:j.results||[]};save();
+  return j.results||[];
+}
+async function fxRate(){
+  if(DB.settings.fx&&Date.now()-DB.settings.fx.ts<24*36e5)return DB.settings.fx.rate;
+  try{
+    const j=await fetch('https://open.er-api.com/v6/latest/USD').then(r=>r.json());
+    if(j&&j.rates&&j.rates.EUR){DB.settings.fx={ts:Date.now(),rate:j.rates.EUR};save();return j.rates.EUR;}
+  }catch(e){}
+  return DB.settings.fx?DB.settings.fx.rate:0.92;
+}
+function norm(s){return (s||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();}
+function setMatch(groups,set){
+  const sn=norm(set);
+  return groups.find(g=>norm(g.name).includes(sn))||groups.find(g=>sn.includes(norm(g.name).replace(/^\w+\d+:?\s*/,'')));
+}
+async function cardPrice(c){
+  try{
+    const groups=await tgGroups();
+    const g=setMatch(groups,(c.set&&c.set.name)||'');
+    if(!g)return null;
+    const prod=await fetch('https://tcgcsv.com/tcgplayer/3/'+g.groupId+'/products').then(r=>r.json());
+    const num=(norm(c.localId).match(/^0*(\d+)/)||[])[1]||norm(c.localId);
+    const prods=(prod.results||[]).filter(pt=>{
+      const e=(pt.extendedData||[]).find(x=>x.name==='Number');
+      const v=(norm(e?e.value:'').match(/^0*(\d+)/)||[])[1];
+      return v&&v===num;
+    });
+    if(!prods.length)return null;
+    const pr2=await fetch('https://tcgcsv.com/tcgplayer/3/'+g.groupId+'/prices').then(r=>r.json());
+    const byId=new Map((pr2.results||[]).map(x=>[x.productId,x]));
+    const row=prods.map(pt=>byId.get(pt.productId)).find(v=>v&&v.marketPrice);
+    const url='https://www.tcgplayer.com/product/'+prods[0].productId;
+    return row?{usd:row.marketPrice,url}:null;
+  }catch(e){return null;}
 }
 $('btnSearch').onclick=async()=>{
   const q=$('q').value.trim();if(!q)return;
   $('results').innerHTML='<div class="mut">Suche…</div>';
-  const cards=await apiSearch(q);
+  let list=[];
+  try{
+    const r=await fetch('https://api.tcgdex.net/v2/en/cards?name='+encodeURIComponent(q));
+    const j=await r.json();
+    if(Array.isArray(j))list=j;
+  }catch(e){}
+  list=list.filter(x=>x.image).slice(0,16);
+  if(!list.length){$('results').innerHTML='<div class="mut">Keine Treffer.</div>';return;}
+  const details=(await Promise.all(list.map(x=>fetch('https://api.tcgdex.net/v2/en/cards/'+x.id).then(r=>r.json()).catch(()=>null)))).filter(Boolean);
   const box=$('results');box.innerHTML='';
-  if(!cards.length){box.innerHTML='<div class="mut">Keine Treffer.</div>';return;}
-  cards.forEach(c=>{
-    const cm=c.cardmarket&&c.cardmarket.prices?c.cardmarket.prices.trendPrice:null;
-    const tc=c.tcgplayer&&c.tcgplayer.prices&&c.tcgplayer.prices.normal?c.tcgplayer.prices.normal.market:null;
+  details.forEach(c=>{
     const d=document.createElement('div');d.className='res';
     const rar=c.rarity?` · ${esc(c.rarity)}`:'';
-    d.innerHTML=`<img src="${c.images.small}" loading="lazy"><div class="t"><b>${esc(c.name)}</b>${esc(c.set.name)} · #${esc(c.number||'')}${rar}</div><div class="p">CM ${cm!=null?cm.toFixed(2)+' €':'–'}${tc?'<br>TCG $'+tc:''}</div>`;
-    d.onclick=()=>{
-      cur.cardId=c.id;cur.cardName=c.name;cur.cardSet=c.set.name;cur.cardNum=c.number;
-      cur.cardRarity=c.rarity||'';cur.cardDate=(c.set&&c.set.releaseDate)||'';
-      cur.cmUrl=(c.cardmarket&&c.cardmarket.url)||'';
-      const trend=cm!=null?cm:(tc!=null?tc*0.93:null);
-      cur.priceRaw=trend!=null?Math.round(trend*100)/100:null;
-      cur.price9=cur.priceRaw!=null?Math.round(cur.priceRaw*1.5*100)/100:null;
-      cur.price10=cur.priceRaw!=null?Math.round(cur.priceRaw*2.5*100)/100:null;
+    d.innerHTML=`<img src="${c.image}/low.png" loading="lazy"><div class="t"><b>${esc(c.name)}</b>${esc(c.set?c.set.name:'')} · #${esc(c.localId||'')}${rar}</div><div class="p mut">Preis…</div>`;
+    d.onclick=async()=>{
+      cur.cardId=c.id;cur.cardName=c.name;cur.cardSet=c.set?c.set.name:'';cur.cardNum=c.localId;
+      cur.cardRarity=c.rarity||'';cur.cardDate='';
+      cur.cmUrl='https://www.cardmarket.com/en/Pokemon/Products/Search?searchString='+encodeURIComponent(c.name+' '+cur.cardSet);
+      cur.priceRaw=null;cur.price9=null;cur.price10=null;
       cur.grade=estimate(cur);
-      // duplicate check: already scanned?
-      const dup=DB.cards.find(x=>(c.id&&x.cardId===c.id)||(x.cardName===c.name&&x.cardSet===c.set.name&&x.cardNum===c.number));
+      const dup=DB.cards.find(x=>(c.id&&x.cardId===c.id)||(x.cardName===c.name&&x.cardSet===cur.cardSet&&x.cardNum===cur.cardNum));
       cur.dupNote=dup?`Bereits im Verlauf (${new Date(dup.ts).toLocaleDateString('de-DE')}, Grade ${dup.grade?dup.grade.overall:'–'}) — kein erneuter Scan nötig.`:null;
+      renderCard();
+      const pr=await cardPrice(c);
+      if(pr){
+        const rate=await fxRate();
+        cur.priceRaw=Math.round(pr.usd*rate*100)/100;
+        cur.price9=cur.priceRaw!=null?Math.round(cur.priceRaw*1.5*100)/100:null;
+        cur.price10=cur.priceRaw!=null?Math.round(cur.priceRaw*2.5*100)/100:null;
+      }
+      cur.grade=estimate(cur);
       renderCard();
     };
     box.appendChild(d);
@@ -546,7 +595,7 @@ function renderList(){
   if(!cnt)box.innerHTML='<div class="mut">Noch keine Karten gescannt.</div>';
 }
 $('btnCsv').onclick=()=>{
-  const rows=[['Datum','Name','Set','Nummer','Seltenheit','Release','Grade-Schätzung','Cardmarket €','PSA9 €','PSA10 €','Centering LR','Centering TB','Whitening','Kratzer','Ecken','Biegung','Printlinien','Glanz']];
+  const rows=[['Datum','Name','Set','Nummer','Seltenheit','Release','Grade-Schätzung','Preis €','PSA9 €','PSA10 €','Centering LR','Centering TB','Whitening','Kratzer','Ecken','Biegung','Printlinien','Glanz']];
   DB.cards.forEach(c=>rows.push([
     new Date(c.ts).toISOString().slice(0,10),c.cardName||'',c.cardSet||'',c.cardNum||'',c.cardRarity||'',c.cardDate||'',
     c.grade?c.grade.overall:'',c.priceRaw??'',c.price9??'',c.price10??'',
@@ -560,9 +609,7 @@ $('btnClear').onclick=()=>{
   if(confirm('Wirklich alle Karten löschen?')){DB.cards=[];save();renderList();renderBatch();}
 };
 
-// ---------- settings ----------
-$('inpKey').value=DB.settings.apiKey||'';
-$('btnKeySave').onclick=()=>{DB.settings.apiKey=$('inpKey').value.trim();save();toast('Key gespeichert.');};
+
 
 // ---------- SW ----------
 if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{});}

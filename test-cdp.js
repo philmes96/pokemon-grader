@@ -83,7 +83,7 @@ async function main() {
 
   // 1. page structure renders
   out.screens = await ev(`document.querySelectorAll('.screen').length`);
-  out.navButtons = await ev(`document.querySelectorAll('nav button').length`);
+  out.navButtons = await ev(`document.querySelectorAll('#menu button').length`);
   out.title = await ev(`document.title`);
 
   // 2. camera fails gracefully headless (no crash)
@@ -108,10 +108,10 @@ async function main() {
   out.sumText = await ev(`document.getElementById('sumTxt').textContent`);
 
   // 4. value search stub: override fetch to fake API, check results render
-  out.apiReachable = await ev(`fetch('https://api.pokemontcg.io/v2/cards?q=name:pikachu&pageSize=1').then(()=>true).catch(()=>false)`);
+  out.apiReachable = await ev(`fetch('https://api.tcgdex.net/v2/en/cards?name=pikachu').then(()=>true).catch(()=>false)`);
 
   // 5. nav switching works
-  await ev(`document.querySelector('nav button[data-s=\"list\"]').click()`);
+  await ev(`document.querySelector('#menu button[data-s=\"list\"]').click()`);
   out.navList = await ev(`document.getElementById('scr-list').classList.contains('active')`);
 
   out.jsErrors = errors;
