@@ -644,7 +644,7 @@ async function tgSets(){
 function numKey(s){const m=(s||'').replace(/\s/g,'').match(/^0*(\d+)/);return m?m[1]:null;}
 const SETCODES={MEW:'sv03.5',SVI:'sv01',PAL:'sv02',OBF:'sv03',PAR:'sv04',TEF:'sv05',TWM:'sv06',SFA:'sv06.5',SCR:'sv07',SSP:'sv08',PRE:'sv08.5',JTG:'sv09',DRI:'sv10',PAF:'sv04.5',
 SWSH:'swsh1',RCL:'swsh2',DAA:'swsh3',VIV:'swsh4',BST:'swsh5',CRE:'swsh6',EVS:'swsh7',FST:'swsh8',BRS:'swsh9',ASR:'swsh10',PGO:'swsh10.5',LOR:'swsh11',SIT:'swsh12',CRZ:'swsh12.5',SHF:'swsh4.5',CHP:'swsh3.5',
-SM:'sm1',GRI:'sm2',BUS:'sm3',CIN:'sm4',UPR:'sm5',FLI:'sm6',CES:'sm7',LOT:'sm8',TEU:'sm9',UNB:'sm10',UNM:'sm11',CEC:'sm12',SLG:'sm3.5',DRM:'sm7.5'};
+SM:'sm1',GRI:'sm2',BUS:'sm3',CIN:'sm4',UPR:'sm5',FLI:'sm6',CES:'sm7',LOT:'sm8',TEU:'sm9',UNB:'sm10',UNM:'sm11',CEC:'sm12',SLG:'sm3.5',DRM:'sm7.5',BLK:'sv10.5b',WHT:'sv10.5w',MEG:'me01',PFL:'me02',ASC:'me02.5',POR:'me03',CRI:'me04'};
 function parseQuery(q){
   let num=null,rest=q,code=null;
   const cm=q.trim().match(/^([A-Za-z]{2,5})\s*[-–]?\s*(\d{1,3})\s*(?:\/\s*\d+)?\s*(.*)$/);
@@ -757,28 +757,38 @@ async function ocrIdentify(){
   try{
     await loadTess();
     const img=await loadImg(cur.front);
-    const c=document.createElement('canvas');
-    const s=Math.min(1,1600/Math.max(img.width,img.height));
-    c.width=img.width*s;c.height=img.height*s;
-    const ctx=c.getContext('2d');ctx.drawImage(img,0,0,c.width,c.height);
-    // card name sits top-left
-    const rc=document.createElement('canvas');
-    rc.width=Math.round(c.width*0.78);rc.height=Math.round(c.height*0.26);
-    rc.getContext('2d').drawImage(c,0,0,rc.width,rc.height);
-    const res=await Tesseract.recognize(rc,'eng');
-    // bottom-left: printed set code + number, e.g. "MEW 129/165"
+    const c=drawToCanvas(img);
+    // crop detected card region (not the whole photo incl. background)
+    const box=cur.centering&&cur.centering.ok&&cur.centering.box?cur.centering.box:[0,0,c.width,c.height];
+    const card=document.createElement('canvas');card.width=box[2];card.height=box[3];
+    card.getContext('2d').drawImage(c,box[0],box[1],box[2],box[3],0,0,box[2],box[3]);
+    // PRIMARY: bottom-left = printed set code + number, e.g. "MEW 129/165"
     const bc=document.createElement('canvas');
-    bc.width=Math.round(c.width*0.55);bc.height=Math.round(c.height*0.30);
-    bc.getContext('2d').drawImage(c,0,Math.round(c.height*0.70),bc.width,bc.height);
-    let codeQ='';
+    bc.width=Math.round(card.width*0.60);bc.height=Math.round(card.height*0.30);
+    bc.getContext('2d').drawImage(card,0,Math.round(card.height*0.70),bc.width,bc.height,0,0,bc.width,bc.height);
+    let code=null,num=null;
     try{
-      const res2=await Tesseract.recognize(bc,'eng');
-      const m=((res2.data&&res2.data.text)||'').match(/\b([A-Za-z]{2,5})\s*[-–]?\s*0*(\d{1,3})\s*(?:\/\s*\d+)?/);
-      if(m&&SETCODES[m[1].toUpperCase()])codeQ=m[1].toUpperCase()+' '+m[2];
+      const r2=await Tesseract.recognize(bc,'eng');
+      const t2=(r2.data&&r2.data.text)||'';
+      const m=t2.match(/\b([A-Za-z]{2,5})\s*[-–]?\s*0*(\d{1,3})\s*(?:\/\s*\d+)?/);
+      if(m&&SETCODES[m[1].toUpperCase()]){code=SETCODES[m[1].toUpperCase()];num=numKey(m[2]);}
+      else if(m)num=numKey(m[2]);
+      if(num==null){const m2=t2.match(/0*(\d{1,3})\s*\/\s*\d+/);if(m2)num=numKey(m2[1]);}
     }catch(e){}
-    const nameQ=pickQueryFromText(res.data&&res.data.text||'');
-    let q=codeQ?codeQ+(nameQ?' '+nameQ:''):nameQ;
-    if(!q){toast('Kein Kartenname erkannt — bitte manuell suchen.');return;}
+    // SECONDARY: top-left name
+    const nc=document.createElement('canvas');
+    nc.width=Math.round(card.width*0.65);nc.height=Math.round(card.height*0.22);
+    nc.getContext('2d').drawImage(card,0,0,nc.width,nc.height);
+    let nameQ='';
+    try{
+      const r1=await Tesseract.recognize(nc,'eng');
+      nameQ=pickQueryFromText((r1.data&&r1.data.text)||'');
+    }catch(e){}
+    let q;
+    if(code&&num!=null)q=code+' '+num+(nameQ?' '+nameQ:'');
+    else if(num!=null&&nameQ)q=nameQ+' '+num;
+    else q=nameQ;
+    if(!q){toast('Erkennung unklar — bitte Name oder Code+Nummer eintippen (z.B. MEW 129).');return;}
     $('q').value=q;
     await doSearch(q,true);
     if(!cur.cardName)toast('Nicht sicher erkannt? Karte unten aus der Trefferliste wählen.');
