@@ -198,6 +198,10 @@ canvas#work{display:none}
 <!-- ============ EINSTELLUNGEN ============ -->
 <section class="screen" id="scr-set">
   <div class="panel">
+    <h2>Anzeige</h2>
+    <label class="flag"><input type="checkbox" id="setRefCmp"> Referenzbild-Vergleich anzeigen (Dein Foto neben TCGdex-Referenz)</label>
+  </div>
+  <div class="panel">
     <h2>Datenquellen</h2>
     <div class="mut">Karten-Daten: <b>TCGdex</b> (kostenlos, kein Account nötig). Preise: <b>TCGCSV/TCGPlayer</b> (USD, automatisch in EUR umgerechnet, Wechselkurs täglich aktualisiert). Cardmarket-Preise sind ohne Login nicht abrufbar — dafür gibt's den Direkt-Such-Button.</div>
   </div>
@@ -452,7 +456,7 @@ function renderCard(){
   else{bt.style.display='none';}
   $('priceNote').textContent=c.priceNote||'';
   const cp=$('cmpPanel');
-  if(c.imageUrl||c.disp||c.thumb){cp.style.display='block';$('myShot').src=c.disp||c.thumb||'';$('refShot').src=c.imageUrl||'';}
+  if(DB.settings.refCompare!==false&&(c.imageUrl||c.disp||c.thumb)){cp.style.display='block';$('myShot').src=c.disp||c.thumb||'';$('refShot').src=c.imageUrl||'';}
   else cp.style.display='none';
   $('cmHint').textContent=c.cmUrl?'Preis = TCGPlayer-Marktwert (USD\u2192EUR umgerechnet). Cardmarket-Preise gehen ohne Login nicht \u2014 Button f\u00fchrt zur CM-Suche mit Preis-Graph.':''; 
   const dn=$('dupNote');
@@ -1038,6 +1042,7 @@ $('btnClear').onclick=()=>{
 if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{});}
 
 // init
+const $rc=$('setRefCmp');$rc.checked=DB.settings.refCompare!==false;$rc.onchange=()=>{DB.settings.refCompare=$rc.checked;save();};
 renderBatch();renderHist();
 if(DB.cards.length){renderList();}
 startCam();
