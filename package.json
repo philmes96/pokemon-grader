@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "pngjs": "^7.0.0",
+    "tesseract.js": "^5.1.1"
+  }
+}

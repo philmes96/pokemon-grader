@@ -109,6 +109,10 @@ canvas#work{display:none}
     <div class="mut">Name oder Set + Nummer eingeben, z.B. <b>Pikachu VMAX Vivid Voltage 44</b> oder <b>199/197</b> zusammen mit Name.</div>
     <div class="setline"><input type="search" id="q" placeholder="z.B. Charizard ex 199/197 oder Vivid Voltage 44"><button class="ghost" style="width:auto;margin:0" id="btnSearch">Suchen</button></div>
     <button class="ghost" id="btnOcr">🔍 Karte aus Foto erkennen (OCR)</button>
+    <details id="ocrDbg" class="ghost" style="width:auto;margin-top:6px;font-size:12px;display:none">
+      <summary style="cursor:pointer">🔧 OCR-Diagnose anzeigen</summary>
+      <div style="margin-top:8px" id="ocrDbgBody"></div>
+    </details>
     <div id="results"></div>
   </div>
   <div class="panel" id="cmpPanel" style="display:none">
@@ -739,7 +743,176 @@ $('btnOcr').onclick=()=>ocrIdentify();
 $('btnSearch').onclick=()=>{const q=$('q').value.trim();if(q)doSearch(q,false);};
 
 // ---------- OCR auto-identify ----------
-let tessLoaded=false;
+let tessLoaded=false,tw=null;
+async function tessWorker(){
+  if(tw)return tw;
+  await loadTess();
+  tw=await Tesseract.createWorker('eng');
+  return tw;
+}
+// grayscale + contrast stretch (+ optional invert), 3x upscale
+function prepCanvas(src,sx,sy,sw,sh,inv){
+  const cv=document.createElement('canvas');
+  cv.width=Math.max(1,sw*3);cv.height=Math.max(1,sh*3);
+  const x=cv.getContext('2d');
+  x.drawImage(src,sx,sy,sw,sh,0,0,cv.width,cv.height);
+  const d=x.getImageData(0,0,cv.width,cv.height);
+  const n=d.data.length;const g=new Float32Array(n/4);
+  let mn=255,mx=0;
+  for(let i=0,j=0;i<n;i+=4,j++){const v=0.299*d.data[i]+0.587*d.data[i+1]+0.114*d.data[i+2];g[j]=v;if(v<mn)mn=v;if(v>mx)mx=v;}
+  const span=Math.max(1,mx-mn);
+  for(let j=0,i=0;j<g.length;j++,i+=4){
+    let v=Math.round((g[j]-mn)/span*255);
+    if(inv)v=255-v;
+    d.data[i]=d.data[i+1]=d.data[i+2]=v;
+  }
+  x.putImageData(d,0,0);
+  return cv;
+}
+// grayscale canvas, optional scale
+function grayCanvas(src,sx,sy,sw,sh,scale){
+  const c=document.createElement('canvas');c.width=Math.max(1,Math.round(sw*scale));c.height=Math.max(1,Math.round(sh*scale));
+  const x=c.getContext('2d',{willReadFrequently:true});x.imageSmoothingEnabled=false;
+  x.drawImage(src,sx,sy,sw,sh,0,0,c.width,c.height);
+  return c;
+}
+function luma(x,i){return 0.299*x[i]+0.587*x[i+1]+0.114*x[i+2];}
+// Otsu threshold on grayscale canvas data; returns {t, darkFrac}
+function otsu(x){
+  const hist=new Array(256).fill(0),n=x.length/4;
+  for(let i=0;i<x.length;i+=4)hist[Math.round(luma(x,i))]++;
+  let sum=0;for(let i=0;i<256;i++)sum+=i*hist[i];
+  let sumB=0,wB=0,best=-1,t=128;
+  for(let i=0;i<256;i++){wB+=hist[i];if(!wB)continue;const wF=n-wB;if(!wF)break;
+    sumB+=i*hist[i];const mB=sumB/wB,mF=(sum-sumB)/wF,v=wB*wF*(mB-mF)*(mB-mF);
+    if(v>best){best=v;t=i;}}
+  let dark=0;for(let i=0;i<256&&i<=t;i++)dark+=hist[i];
+  return{t,darkFrac:dark/n};
+}
+// find the solid black set-code box in the bottom strip of a card canvas.
+// returns {x,y,w,h} in card coords or null.
+function findSetBox(card){
+  const sx=0,sy=Math.round(card.height*0.86),sw=Math.round(card.width*0.55),sh=Math.round(card.height*0.14);
+  if(sw<8||sh<8)return null;
+  const strip=grayCanvas(card,sx,sy,sw,sh,1);
+  const d=strip.getContext('2d',{willReadFrequently:true}).getImageData(0,0,strip.width,strip.height).data;
+  const W=strip.width,H=strip.height;
+  // per-column dark fraction (text is white inside box, rest solid black)
+  const dark=new Array(W).fill(0);
+  for(let yy=0;yy<H;yy++)for(let xx=0;xx<W;xx++){const i=(yy*W+xx)*4;if(luma(d,i)<90)dark[xx]++;}
+  const minY=Math.max(3,Math.round(H*0.30));
+  // candidate runs of columns that are mostly dark
+  let best=null;
+  let run=-1;
+  for(let xx=0;xx<=W;xx++){
+    const isDark=xx<W&&dark[xx]>=minY;
+    if(isDark&&run<0)run=xx;
+    if((!isDark||xx===W)&&run>=0){
+      const w=xx-run;
+      if(w>=Math.round(W*0.09)&&w<=Math.round(W*0.45)){
+        // verify: solid rectangle, mostly dark, with bright text pixels inside
+        let boxDark=0,tot=0,bright=0;
+        for(let yy=0;yy<H;yy++)for(let x2=run;x2<xx;x2++){const i=(yy*W+x2)*4;const l=luma(d,i);tot++;if(l<90)boxDark++;else if(l>170)bright++;}
+        const frac=boxDark/tot;
+        if(frac>0.62&&bright/tot>0.008){
+          if(!best||frac>best.frac)best={x:run,w:w,frac:frac};
+        }
+      }
+      run=-1;
+    }
+  }
+  if(!best)return null;
+  // vertical extent of box within the run: rows where >60% of run cols are dark
+  let y0=H,y1=0;
+  for(let yy=0;yy<H;yy++){let cnt=0;for(let x2=best.x;x2<best.x+best.w;x2++){const i=(yy*W+x2)*4;if(luma(d,i)<90)cnt++;}
+    if(cnt>best.w*0.55){if(yy<y0)y0=yy;if(yy>y1)y1=yy;}}
+  if(y1-y0<Math.round(H*0.18))return null;
+  return{x:sx+best.x,y:sy+y0,w:best.w,h:y1-y0+1};
+}
+// OCR the 3 set letters inside the black box (white on black -> invert)
+async function ocrSetLetters(card,box){
+  const w=await tessWorker();
+  const pad=Math.round(box.w*0.10);
+  const cv=grayCanvas(card,box.x+pad,box.y+Math.round(box.h*0.12),Math.max(4,box.w-2*pad),Math.round(box.h*0.76),6);
+  const x=cv.getContext('2d',{willReadFrequently:true});
+  const d=x.getImageData(0,0,cv.width,cv.height);
+  const o=otsu(d.data);
+  const mk=inv=>{const c2=document.createElement('canvas');c2.width=cv.width;c2.height=cv.height;
+    const x2=c2.getContext('2d',{willReadFrequently:true});const d2=x2.createImageData(cv.width,cv.height);
+    for(let i=0;i<d.data.length;i+=4){const L=luma(d.data,i);const v=(L>o.t)===!!inv?0:255;d2.data[i]=d2.data[i+1]=d2.data[i+2]=v;d2.data[i+3]=255;}
+    x2.putImageData(d2,0,0);return c2;};
+  let fb='',fbRaw='';
+  for(const c2 of [mk(true),mk(false)]){
+    for(const psm of ['7','8']){
+      try{
+        await w.setParameters({tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ',tessedit_pageseg_mode:psm});
+        const r=await w.recognize(c2);
+        const raw=((r.data&&r.data.text)||'');
+        const t=raw.replace(/[^A-Za-z]/g,'').toUpperCase();
+        if(SETCODES[t]){await w.setParameters({tessedit_char_whitelist:'',tessedit_pageseg_mode:'3'});return{code:t,raw:raw};}
+        if(t.length===3&&t.length>fb.length){fb=t;fbRaw=raw;}
+        else if(t.length>=2&&t.length<=5&&!fb){fb=t;fbRaw=raw;}
+      }catch(e){}
+    }
+  }
+  await w.setParameters({tessedit_char_whitelist:'',tessedit_pageseg_mode:'3'});
+  return{code:fb,raw:fbRaw};
+}
+// OCR the printed number right of the box; prefer the 3-digit number before "/", keep leading zero via numKey
+async function ocrCardNumber(card,box){
+  const w=await tessWorker();
+  const nx=box.x+box.w+Math.round(box.w*0.35);
+  const nw=Math.round(card.width*0.36);
+  const ny=box.y+Math.round(box.h*0.05),nh=Math.round(box.h*0.95);
+  const cv=grayCanvas(card,nx,ny,nw,nh,6);
+  const x=cv.getContext('2d',{willReadFrequently:true});
+  const d=x.getImageData(0,0,cv.width,cv.height);
+  const o=otsu(d.data);
+  const mk=inv=>{const c2=document.createElement('canvas');c2.width=cv.width;c2.height=cv.height;
+    const x2=c2.getContext('2d',{willReadFrequently:true});const d2=x2.createImageData(cv.width,cv.height);
+    for(let i=0;i<d.data.length;i+=4){const L=luma(d.data,i);const v=(L>o.t)===!!inv?0:255;d2.data[i]=d2.data[i+1]=d2.data[i+2]=v;d2.data[i+3]=255;}
+    x2.putImageData(d2,0,0);return c2;};
+  let best=null,bestRaw='';
+  for(const t of [mk(false),mk(true)]){
+    for(const psm of ['7','8']){
+      try{
+        await w.setParameters({tessedit_char_whitelist:'0123456789/',tessedit_pageseg_mode:psm});
+        const r=await w.recognize(t);
+        const raw=((r.data&&r.data.text)||'');
+        const txt=raw.replace(/[^0-9/]/g,'');
+        const m=txt.match(/0*(\d{3})\s*\//)||txt.match(/0*(\d{3})/)||txt.match(/0*(\d{2})\s*\//);
+        if(m){
+          const strong=m[0].indexOf('/')>=0;
+          const n=numKey(m[1]);
+          if(n&&!best){best=n;bestRaw=raw;}
+          else if(n&&best&&strong&&n.length>=best.length){best=n;bestRaw=raw;}
+        }
+      }catch(e){}
+    }
+  }
+  await w.setParameters({tessedit_char_whitelist:'',tessedit_pageseg_mode:'3'});
+  return{n:best,raw:bestRaw};
+}
+// bottom strip: white-on-black set code box + printed number, two passes (normal + inverted)
+async function ocrCodeStrip(card){
+  const sx=0,sy=Math.round(card.height*0.845),sw=Math.round(card.width*0.48),sh=Math.round(card.height*0.145);
+  const w=await tessWorker();
+  await w.setParameters({tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/',tessedit_pageseg_mode:'7'});
+  const tries=[prepCanvas(card,sx,sy,sw,sh,false),prepCanvas(card,sx,sy,sw,sh,true)];
+  let best='';
+  for(const cv of tries){
+    try{
+      const r=await w.recognize(cv);
+      const t=((r.data&&r.data.text)||'').replace(/[^A-Z0-9/\n]/g,'');
+      const m=t.match(/([A-Z]{2,5})\s*[-–]?\s*0*(\d{2,3})/);
+      const cand=m?m[0]:(t.match(/0*\d{2,3}/)||[''])[0];
+      if(cand.length>best.length)best=cand;
+      if(m)break;
+    }catch(e){}
+  }
+  await w.setParameters({tessedit_char_whitelist:'',tessedit_pageseg_mode:'3'});
+  return best;
+}
 function loadTess(){return new Promise((res,rej)=>{if(tessLoaded)return res();
   const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
   s.onload=()=>{tessLoaded=true;res();};s.onerror=rej;document.head.appendChild(s);});}
@@ -750,6 +923,19 @@ function pickQueryFromText(t){
     const clean=w.replace(/[^A-Za-zÄÖÜäöüéè\-\.'’]/g,'');
     if(clean.length>2&&!stop.has(clean.toLowerCase()))words.push(clean);}));
   return words.slice(0,4).join(' ');
+}
+function showOcrDebug(dbg){
+  const d=$('ocrDbg'),b=$('ocrDbgBody');
+  if(!d||!b)return;
+  d.style.display=Object.keys(dbg).length?'block':'none';
+  let html='';
+  if(dbg.err)html+='<div style="color:#c33">Fehler: '+esc(dbg.err)+'</div>';
+  if(dbg.box)html+='<div>Box: '+esc(dbg.box)+'</div>';
+  if(dbg.letters)html+='<div>Set-Buchstaben OCR-Roh: <b>'+esc(dbg.letters)+'</b></div>';
+  if(dbg.num)html+='<div>Zahl OCR-Roh: <b>'+esc(dbg.num)+'</b></div>';
+  if(dbg.boxImg)html+='<div>Box-Crop:<br><img src="'+dbg.boxImg+'" style="width:140px;image-rendering:pixelated;border:1px solid var(--border)"></div>';
+  if(dbg.numImg)html+='<div>Zahlen-Crop:<br><img src="'+dbg.numImg+'" style="width:200px;image-rendering:pixelated;border:1px solid var(--border)"></div>';
+  b.innerHTML=html||'(keine Diagnose)';
 }
 async function ocrIdentify(){
   if(!cur.front){toast('Erst ein Foto machen.');return;}
@@ -762,31 +948,50 @@ async function ocrIdentify(){
     const box=cur.centering&&cur.centering.ok&&cur.centering.box?cur.centering.box:[0,0,c.width,c.height];
     const card=document.createElement('canvas');card.width=box[2];card.height=box[3];
     card.getContext('2d').drawImage(c,box[0],box[1],box[2],box[3],0,0,box[2],box[3]);
-    // PRIMARY: bottom-left = printed set code + number, e.g. "MEW 129/165"
-    const bc=document.createElement('canvas');
-    bc.width=Math.round(card.width*0.60);bc.height=Math.round(card.height*0.30);
-    bc.getContext('2d').drawImage(card,0,Math.round(card.height*0.70),bc.width,bc.height,0,0,bc.width,bc.height);
-    let code=null,num=null;
+    // PRIMARY: locate solid black set-code box at bottom-left, OCR its letters + printed number
+    let code=null,num=null,dbg={};
     try{
-      const r2=await Tesseract.recognize(bc,'eng');
-      const t2=(r2.data&&r2.data.text)||'';
-      const m=t2.match(/\b([A-Za-z]{2,5})\s*[-–]?\s*0*(\d{1,3})\s*(?:\/\s*\d+)?/);
-      if(m&&SETCODES[m[1].toUpperCase()]){code=SETCODES[m[1].toUpperCase()];num=numKey(m[2]);}
-      else if(m)num=numKey(m[2]);
-      if(num==null){const m2=t2.match(/0*(\d{1,3})\s*\/\s*\d+/);if(m2)num=numKey(m2[1]);}
-    }catch(e){}
+      const sb=findSetBox(card);
+      dbg.box=sb?JSON.stringify(sb):'nicht gefunden';
+      if(sb){
+        const L=await ocrSetLetters(card,sb);
+        dbg.letters=L.raw||'(leer)';
+        const N=await ocrCardNumber(card,sb);
+        dbg.num=N.raw||'(leer)';
+        if(L.code){if(SETCODES[L.code])code=SETCODES[L.code];else cur.setCodeRaw=L.code;}
+        if(N.n!=null)num=N.n;
+        try{
+          dbg.boxImg=grayCanvas(card,sb.x,sb.y,sb.w,sb.h,4).toDataURL('image/png');
+          const nx2=sb.x+sb.w+Math.round(sb.w*0.35),ny2=sb.y+Math.round(sb.h*0.05);
+          dbg.numImg=grayCanvas(card,nx2,ny2,Math.round(card.width*0.36),Math.round(sb.h*0.95),4).toDataURL('image/png');
+        }catch(e){}
+      }
+    }catch(e){dbg.err=String(e&&e.message||e);}
+    showOcrDebug(dbg);
+    // SECONDARY: full bottom-strip OCR (older cards without black box)
+    if(!code&&num==null){
+      try{
+        const t2=await ocrCodeStrip(card);
+        const m=t2&&t2.match(/\b([A-Z]{2,5})\s*[-–]?\s*0*(\d{2,3})\b/);
+        if(m&&SETCODES[m[1]]){code=SETCODES[m[1]];num=numKey(m[2]);}
+        else if(m){num=numKey(m[2]);code=null;}
+        if(num==null&&t2){const m2=t2.match(/0*(\d{2,3})\b/);if(m2)num=numKey(m2[1]);}
+      }catch(e){}
+    }
     // SECONDARY: top-left name
-    const nc=document.createElement('canvas');
-    nc.width=Math.round(card.width*0.65);nc.height=Math.round(card.height*0.22);
-    nc.getContext('2d').drawImage(card,0,0,nc.width,nc.height);
     let nameQ='';
     try{
-      const r1=await Tesseract.recognize(nc,'eng');
+      const w=await tessWorker();
+      await w.setParameters({tessedit_pageseg_mode:'7'});
+      const nc=prepCanvas(card,0,0,Math.round(card.width*0.62),Math.round(card.height*0.20),false);
+      const r1=await w.recognize(nc);
       nameQ=pickQueryFromText((r1.data&&r1.data.text)||'');
+      await w.setParameters({tessedit_pageseg_mode:'3'});
     }catch(e){}
     let q;
     if(code&&num!=null)q=code+' '+num+(nameQ?' '+nameQ:'');
-    else if(num!=null&&nameQ)q=nameQ+' '+num;
+    else if(num!=null)q=(nameQ?nameQ+' ':'')+num;
+    else if(code)q=code+(nameQ?' '+nameQ:'');
     else q=nameQ;
     if(!q){toast('Erkennung unklar — bitte Name oder Code+Nummer eintippen (z.B. MEW 129).');return;}
     $('q').value=q;
