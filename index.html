@@ -773,10 +773,10 @@ function prepCanvas(src,sx,sy,sw,sh,inv){
   x.putImageData(d,0,0);
   return cv;
 }
-// grayscale canvas, optional scale
-function grayCanvas(src,sx,sy,sw,sh,scale){
+// grayscale canvas, optional scale (bilinear=true -> smooth interpolation, best for tiny text OCR)
+function grayCanvas(src,sx,sy,sw,sh,scale,bilinear){
   const c=document.createElement('canvas');c.width=Math.max(1,Math.round(sw*scale));c.height=Math.max(1,Math.round(sh*scale));
-  const x=c.getContext('2d',{willReadFrequently:true});x.imageSmoothingEnabled=false;
+  const x=c.getContext('2d',{willReadFrequently:true});x.imageSmoothingEnabled=!!bilinear;
   x.drawImage(src,sx,sy,sw,sh,0,0,c.width,c.height);
   return c;
 }
@@ -793,51 +793,58 @@ function otsu(x){
   let dark=0;for(let i=0;i<256&&i<=t;i++)dark+=hist[i];
   return{t,darkFrac:dark/n};
 }
-// find the solid black set-code box in the bottom strip of a card canvas.
-// returns {x,y,w,h} in card coords or null.
+// find the black set-code box in the bottom third via connected components.
+// returns {cands:[{x,y,w,h,...}]} sorted left-first, or null.
 function findSetBox(card){
-  const sx=0,sy=Math.round(card.height*0.86),sw=Math.round(card.width*0.55),sh=Math.round(card.height*0.14);
-  if(sw<8||sh<8)return null;
-  const strip=grayCanvas(card,sx,sy,sw,sh,1);
-  const d=strip.getContext('2d',{willReadFrequently:true}).getImageData(0,0,strip.width,strip.height).data;
-  const W=strip.width,H=strip.height;
-  // per-column dark fraction (text is white inside box, rest solid black)
-  const dark=new Array(W).fill(0);
-  for(let yy=0;yy<H;yy++)for(let xx=0;xx<W;xx++){const i=(yy*W+xx)*4;if(luma(d,i)<90)dark[xx]++;}
-  const minY=Math.max(3,Math.round(H*0.30));
-  // candidate runs of columns that are mostly dark
-  let best=null;
-  let run=-1;
-  for(let xx=0;xx<=W;xx++){
-    const isDark=xx<W&&dark[xx]>=minY;
-    if(isDark&&run<0)run=xx;
-    if((!isDark||xx===W)&&run>=0){
-      const w=xx-run;
-      if(w>=Math.round(W*0.09)&&w<=Math.round(W*0.45)){
-        // verify: solid rectangle, mostly dark, with bright text pixels inside
-        let boxDark=0,tot=0,bright=0;
-        for(let yy=0;yy<H;yy++)for(let x2=run;x2<xx;x2++){const i=(yy*W+x2)*4;const l=luma(d,i);tot++;if(l<90)boxDark++;else if(l>170)bright++;}
-        const frac=boxDark/tot;
-        if(frac>0.62&&bright/tot>0.008){
-          if(!best||frac>best.frac)best={x:run,w:w,frac:frac};
-        }
+  const W=card.width,H=card.height;
+  const y0=Math.round(H*0.68);
+  const strip=grayCanvas(card,0,y0,W,H-y0,1);
+  const d=strip.getContext('2d',{willReadFrequently:true}).getImageData(0,0,W,H-y0).data;
+  const SH=H-y0;
+  const dark=new Uint8Array(W*SH);
+  for(let i=0;i<W*SH;i++)dark[i]=luma(d,i*4)<95?1:0;
+  const lab=new Int32Array(W*SH);const comps=[];const stack=[];
+  for(let i=0;i<W*SH;i++){
+    if(dark[i]&&!lab[i]){
+      let minx=W,maxx=0,miny=SH,maxy=0,cnt=0;
+      stack.push(i);lab[i]=1;
+      while(stack.length){
+        const p=stack.pop();cnt++;
+        const px=p%W,py=(p/W)|0;
+        if(px<minx)minx=px;if(px>maxx)maxx=px;
+        if(py<miny)miny=py;if(py>maxy)maxy=py;
+        if(px>0&&dark[p-1]&&!lab[p-1]){lab[p-1]=1;stack.push(p-1);}
+        if(px<W-1&&dark[p+1]&&!lab[p+1]){lab[p+1]=1;stack.push(p+1);}
+        if(py>0&&dark[p-W]&&!lab[p-W]){lab[p-W]=1;stack.push(p-W);}
+        if(py<SH-1&&dark[p+W]&&!lab[p+W]){lab[p+W]=1;stack.push(p+W);}
       }
-      run=-1;
+      comps.push({minx,maxx,miny,maxy,cnt});
     }
   }
-  if(!best)return null;
-  // vertical extent of box within the run: rows where >60% of run cols are dark
-  let y0=H,y1=0;
-  for(let yy=0;yy<H;yy++){let cnt=0;for(let x2=best.x;x2<best.x+best.w;x2++){const i=(yy*W+x2)*4;if(luma(d,i)<90)cnt++;}
-    if(cnt>best.w*0.55){if(yy<y0)y0=yy;if(yy>y1)y1=yy;}}
-  if(y1-y0<Math.round(H*0.18))return null;
-  return{x:sx+best.x,y:sy+y0,w:best.w,h:y1-y0+1};
+  const minW=Math.round(W*0.035),maxW=Math.round(W*0.18);
+  const minH=Math.round(SH*0.04),maxH=Math.round(SH*0.30);
+  const cand=[];
+  for(const c of comps){
+    const w=c.maxx-c.minx+1,h=c.maxy-c.miny+1;
+    if(w<minW||w>maxW||h<minH||h>maxH)continue;
+    const fill=c.cnt/(w*h);
+    if(fill<0.5||c.maxy>=SH-2)continue;
+    let bright=0,tot=0;
+    for(let yy=c.miny;yy<=c.maxy;yy++)for(let xx=c.minx;xx<=c.maxx;xx++){
+      const l=luma(d,(yy*W+xx)*4);tot++;if(l>170)bright++;
+    }
+    const bp=bright/tot;
+    if(bp<0.004||bp>0.40)continue;
+    cand.push({x:c.minx,y:y0+c.miny,w,h,fill:Math.round(fill*100)/100,brightPct:Math.round(bp*1000)/10});
+  }
+  cand.sort((a,b)=>(a.x-b.x)||(b.fill-a.fill));
+  return cand.length?{cands:cand.slice(0,4)}:null;
 }
-// OCR the 3 set letters inside the black box (white on black -> invert)
+// OCR the 3 set letters inside the black box (glyphs bright on dark -> invert pass), Otsu, bilinear upscale
 async function ocrSetLetters(card,box){
   const w=await tessWorker();
-  const pad=Math.round(box.w*0.10);
-  const cv=grayCanvas(card,box.x+pad,box.y+Math.round(box.h*0.12),Math.max(4,box.w-2*pad),Math.round(box.h*0.76),6);
+  const x0=box.x+2,y0=box.y+2,x1=box.x+2+Math.round(box.w*0.62),y1=box.y+box.h-2;
+  const cv=grayCanvas(card,x0,y0,Math.max(6,x1-x0),Math.max(6,y1-y0),10,true);
   const x=cv.getContext('2d',{willReadFrequently:true});
   const d=x.getImageData(0,0,cv.width,cv.height);
   const o=otsu(d.data);
@@ -853,7 +860,14 @@ async function ocrSetLetters(card,box){
         const r=await w.recognize(c2);
         const raw=((r.data&&r.data.text)||'');
         const t=raw.replace(/[^A-Za-z]/g,'').toUpperCase();
-        if(SETCODES[t]){await w.setParameters({tessedit_char_whitelist:'',tessedit_pageseg_mode:'3'});return{code:t,raw:raw};}
+        let t2=null;
+  // fuzzy: 1 substitute/drop/insert fixes OCR slips like ASL->ASC
+  if(!SETCODES[t]){
+    if(t.length===3){for(const k of Object.keys(SETCODES)){if(k.length===3){let d=0;for(let i=0;i<3;i++)if(k[i]!==t[i])d++;if(d<=1){t2=k;break;}}}}
+    else if(t.length===2){for(const k of Object.keys(SETCODES)){if(k.length===3&&(k.startsWith(t)||k.endsWith(t))){t2=k;break;}}}
+    else if(t.length===4){for(const k of Object.keys(SETCODES)){if(k.length===3&&(k===t.slice(0,3)||k===t.slice(1))){t2=k;break;}}}
+  }
+        if(SETCODES[t]||(t2&&SETCODES[t2])){await w.setParameters({tessedit_char_whitelist:'',tessedit_pageseg_mode:'3'});return{code:t2||t,raw:raw};}
         if(t.length===3&&t.length>fb.length){fb=t;fbRaw=raw;}
         else if(t.length>=2&&t.length<=5&&!fb){fb=t;fbRaw=raw;}
       }catch(e){}
@@ -862,37 +876,40 @@ async function ocrSetLetters(card,box){
   await w.setParameters({tessedit_char_whitelist:'',tessedit_pageseg_mode:'3'});
   return{code:fb,raw:fbRaw};
 }
-// OCR the printed number right of the box; prefer the 3-digit number before "/", keep leading zero via numKey
+// OCR the printed number right of the box (dark digits on light bg); fix threshold 130 primary, Otsu fallback
 async function ocrCardNumber(card,box){
   const w=await tessWorker();
-  const nx=box.x+box.w+Math.round(box.w*0.35);
-  const nw=Math.round(card.width*0.36);
-  const ny=box.y+Math.round(box.h*0.05),nh=Math.round(box.h*0.95);
-  const cv=grayCanvas(card,nx,ny,nw,nh,6);
+  const nx=box.x+box.w+4,nw=Math.round(card.width*0.30);
+  const ny=box.y-Math.round(box.h*0.05),nh=Math.round(box.h*1.2);
+  const cv=grayCanvas(card,nx,ny,nw,nh,10,true);
   const x=cv.getContext('2d',{willReadFrequently:true});
   const d=x.getImageData(0,0,cv.width,cv.height);
   const o=otsu(d.data);
-  const mk=inv=>{const c2=document.createElement('canvas');c2.width=cv.width;c2.height=cv.height;
-    const x2=c2.getContext('2d',{willReadFrequently:true});const d2=x2.createImageData(cv.width,cv.height);
-    for(let i=0;i<d.data.length;i+=4){const L=luma(d.data,i);const v=(L>o.t)===!!inv?0:255;d2.data[i]=d2.data[i+1]=d2.data[i+2]=v;d2.data[i+3]=255;}
-    x2.putImageData(d2,0,0);return c2;};
+  const passes=[[130,false],[130,true],[o.t,false],[o.t,true]];
   let best=null,bestRaw='';
-  for(const t of [mk(false),mk(true)]){
+  for(const [th,inv] of passes){
+    const c2=document.createElement('canvas');c2.width=cv.width;c2.height=cv.height;
+    const x2=c2.getContext('2d',{willReadFrequently:true});const d2=x2.createImageData(cv.width,cv.height);
+    for(let i=0;i<d.data.length;i+=4){const L=luma(d.data,i);let v=inv?(L>th?0:255):(L>th?255:0);
+      d2.data[i]=d2.data[i+1]=d2.data[i+2]=v;d2.data[i+3]=255;}
+    x2.putImageData(d2,0,0);
     for(const psm of ['7','8']){
       try{
         await w.setParameters({tessedit_char_whitelist:'0123456789/',tessedit_pageseg_mode:psm});
-        const r=await w.recognize(t);
+        const r=await w.recognize(c2);
         const raw=((r.data&&r.data.text)||'');
         const txt=raw.replace(/[^0-9/]/g,'');
-        const m=txt.match(/0*(\d{3})\s*\//)||txt.match(/0*(\d{3})/)||txt.match(/0*(\d{2})\s*\//);
+        const m=txt.match(/0*(\d{2,3})\s*\/\s*\d{2,3}/)||txt.match(/0*(\d{2,3})\s*\//)||txt.match(/0*(\d{3})/)||txt.match(/0*(\d{2})\s*\//);
         if(m){
           const strong=m[0].indexOf('/')>=0;
           const n=numKey(m[1]);
           if(n&&!best){best=n;bestRaw=raw;}
-          else if(n&&best&&strong&&n.length>=best.length){best=n;bestRaw=raw;}
+          else if(n&&best&&strong&&n.length>best.length){best=n;bestRaw=raw;}
+          if(best&&strong&&best.length>=3)break;
         }
       }catch(e){}
     }
+    if(best&&best.length>=3)break;
   }
   await w.setParameters({tessedit_char_whitelist:'',tessedit_pageseg_mode:'3'});
   return{n:best,raw:bestRaw};
@@ -952,22 +969,29 @@ async function ocrIdentify(){
     const box=cur.centering&&cur.centering.ok&&cur.centering.box?cur.centering.box:[0,0,c.width,c.height];
     const card=document.createElement('canvas');card.width=box[2];card.height=box[3];
     card.getContext('2d').drawImage(c,box[0],box[1],box[2],box[3],0,0,box[2],box[3]);
-    // PRIMARY: locate solid black set-code box at bottom-left, OCR its letters + printed number
+    // PRIMARY: locate black set-code box (candidates), OCR letters+number until SETCODES match
     let code=null,num=null,dbg={};
     try{
-      const sb=findSetBox(card);
-      dbg.box=sb?JSON.stringify(sb):'nicht gefunden';
-      if(sb){
-        const L=await ocrSetLetters(card,sb);
-        dbg.letters=L.raw||'(leer)';
-        const N=await ocrCardNumber(card,sb);
-        dbg.num=N.raw||'(leer)';
-        if(L.code){if(SETCODES[L.code])code=SETCODES[L.code];else cur.setCodeRaw=L.code;}
-        if(N.n!=null)num=N.n;
+      const res=findSetBox(card);
+      dbg.box=res?JSON.stringify(res.cands):'nicht gefunden';
+      if(res&&res.cands.length){
+        let firstLetters=null,firstNum=null;
+        for(const sb of res.cands){
+          const L=await ocrSetLetters(card,sb);
+          const N=await ocrCardNumber(card,sb);
+          dbg.letters=(dbg.letters?dbg.letters+' | ':'')+(sb.x+':'+L.raw.trim());
+          dbg.num=(dbg.num?dbg.num+' | ':'')+(sb.x+':'+N.raw.trim());
+          if(!firstLetters)firstLetters=L;
+          if(!firstNum)firstNum=N;
+          if(L.code&&SETCODES[L.code]){code=SETCODES[L.code];num=N.n!=null?N.n:num;break;}
+        }
+        if(!code&&firstLetters&&firstLetters.code){cur.setCodeRaw=firstLetters.code;}
+        if(num==null&&firstNum&&firstNum.n!=null)num=firstNum.n;
         try{
-          dbg.boxImg=grayCanvas(card,sb.x,sb.y,sb.w,sb.h,4).toDataURL('image/png');
-          const nx2=sb.x+sb.w+Math.round(sb.w*0.35),ny2=sb.y+Math.round(sb.h*0.05);
-          dbg.numImg=grayCanvas(card,nx2,ny2,Math.round(card.width*0.36),Math.round(sb.h*0.95),4).toDataURL('image/png');
+          const sb0=res.cands[0];
+          dbg.boxImg=grayCanvas(card,sb0.x,sb0.y,sb0.w,sb0.h,4,true).toDataURL('image/png');
+          const nx2=sb0.x+sb0.w+4,ny2=sb0.y-Math.round(sb0.h*0.05);
+          dbg.numImg=grayCanvas(card,nx2,ny2,Math.round(card.width*0.30),Math.round(sb0.h*1.2),4,true).toDataURL('image/png');
         }catch(e){}
       }
     }catch(e){dbg.err=String(e&&e.message||e);}

@@ -1,4 +1,4 @@
-const C='cheesegrader-static-v10';
+const C='cheesegrader-static-v11';
 self.addEventListener('install',e=>{
   e.waitUntil(caches.open(C).then(c=>c.addAll(['./','./index.html','./manifest.webmanifest','./icon-192.png','./icon-512.png'])));
   self.skipWaiting();
