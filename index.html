@@ -725,16 +725,31 @@ async function doSearch(q,auto){
       details=(await Promise.all(list.slice(0,16).map(x=>fetch('https://api.tcgdex.net/v2/en/cards/'+x.id).then(r=>r.json()).catch(()=>null)))).filter(Boolean);
     }
   }else if(num!=null){
-    const sets=await tgSets();
+    const sets=(await tgSets()).slice().sort((a,b)=>a.name.localeCompare(b.name,'de'));
     const box=$('results');box.innerHTML='';
     const hint=document.createElement('div');hint.className='mut';
-    hint.textContent='Nummer '+num+' erkannt, aber Set/Name nicht. Set auswählen — Preis erscheint dann direkt.';
-    const sel=document.createElement('select');
-    sel.innerHTML='<option value="">— Set wählen —</option>'+sets.map(s=>'<option value="'+esc(s.id)+'">'+esc(s.name)+'</option>').join('');
-    sel.style.width='100%';sel.style.marginTop='8px';
+    hint.textContent='Nummer '+num+' erkannt, aber Set/Name nicht. Set suchen/auswählen — Preis erscheint dann direkt.';
+    const inp=document.createElement('input');inp.type='text';inp.placeholder='Set suchen (z.B. „Mega“)…';
+    inp.style.width='100%';inp.style.marginTop='8px';
+    const listEl=document.createElement('div');listEl.style.marginTop='6px';
+    let chosen=null;
+    function renderList(){
+      const f=inp.value.trim().toLowerCase();
+      const hits=sets.filter(s=>!f||s.name.toLowerCase().includes(f)).slice(0,12);
+      listEl.innerHTML='';
+      if(!hits.length){listEl.innerHTML='<div class="mut">Kein Set gefunden.</div>';return;}
+      hits.forEach(s=>{
+        const b=document.createElement('button');b.style.cssText='display:block;width:100%;text-align:left;margin-top:4px;';
+        b.textContent=s.name;
+        b.onclick=()=>{inp.value=s.name;chosen=s;listEl.innerHTML='<div class="mut" style="margin-top:6px;">Ausgewählt: <b>'+esc(s.name)+'</b></div>';};
+        listEl.appendChild(b);
+      });
+    }
+    renderList();
+    inp.oninput=()=>{chosen=null;renderList();};
     const b=document.createElement('button');b.textContent='Diese Nummer suchen';b.style.marginTop='8px';
-    b.onclick=()=>{const s=sets.find(x=>x.id===sel.value);if(s)doSearch(s.name+' '+num,auto);};
-    box.appendChild(hint);box.appendChild(sel);box.appendChild(b);
+    b.onclick=()=>{if(chosen)doSearch(chosen.name+' '+num,auto);};
+    box.appendChild(hint);box.appendChild(inp);box.appendChild(listEl);box.appendChild(b);
     return;
   }
   details.sort((a,b)=>(a.id<b.id?-1:1));
