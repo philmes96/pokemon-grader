@@ -103,7 +103,7 @@ canvas#work{display:none}
 <!-- ============ ERKENNER (Identifikation) ============ -->
 <section class="screen" id="scr-ident">
   <div id="curName" class="big" style="margin:6px 0">Neue Karte</div>
-  <button id="btnCm" style="display:none;margin:8px 0;background:var(--accent,#f7c948);color:#111;font-weight:700;border:0;border-radius:10px;padding:10px 14px;width:100%">🔗 Cardmarket öffnen (Preis-Graph)</button>
+  <a id="btnCm" href="#" target="_blank" rel="noopener" style="display:none;margin:8px 0;background:var(--accent,#f7c948);color:#111;font-weight:700;border:0;border-radius:10px;padding:10px 14px;width:100%;text-align:center;text-decoration:none;display:block">🔗 Cardmarket öffnen (Preis-Graph)</a>
   <div class="okbox" id="dupNote" style="display:none"></div>
   <div class="panel">
     <h2>Karte identifizieren</h2>
@@ -491,7 +491,7 @@ function renderCard(){
   $('iRar').textContent=c.cardRarity||'–';
   $('iDate').textContent=c.cardDate||'–';
   const bt=$('btnCm');
-  if(c.cmUrl){bt.style.display='block';bt.onclick=()=>window.open(c.cmUrl,'_blank');}
+  if(c.cmUrl){bt.style.display='block';bt.href=c.cmUrl;}
   else{bt.style.display='none';}
   $('priceNote').textContent=c.priceNote||'';
   const cp=$('cmpPanel');
@@ -1402,6 +1402,13 @@ const $rc=$('setRefCmp');$rc.checked=DB.settings.refCompare!==false;$rc.onchange
 renderBatch();renderHist();
 if(DB.cards.length){renderList();}
 startCam();
+// Doppel-Zurück: erst beim 2. Tippen innerhalb 2,5s die App schließen
+let lastBack=0;
+window.addEventListener('load',()=>{ if(history.length>1) history.pushState({cg:true},''); });
+addEventListener('popstate',()=>{ const now=Date.now();
+  if(now-lastBack<2500){ history.back(); } // 2. Zurück -> wirklich raus
+  else{ lastBack=now; toast('Nochmal „Zurück“ tippen beendet die App.'); history.pushState({cg:true},''); }
+});
 </script>
 </body>
 </html>
