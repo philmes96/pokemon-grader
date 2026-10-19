@@ -63,6 +63,9 @@ canvas#work{display:none}
 .center-img img{width:100%;display:block}
 
 .big{font-size:18px;font-weight:700}
+.cmp{display:flex;gap:8px}
+.cmp>div{flex:1;min-width:0}
+.cmp img{width:100%;max-height:300px;object-fit:contain;background:#000;border-radius:8px}
 .dl{text-align:center;margin-top:10px}
 </style>
 </head>
@@ -107,6 +110,14 @@ canvas#work{display:none}
     <div class="setline"><input type="search" id="q" placeholder="z.B. Charizard ex 199/197 oder Vivid Voltage 44"><button class="ghost" style="width:auto;margin:0" id="btnSearch">Suchen</button></div>
     <button class="ghost" id="btnOcr">🔍 Karte aus Foto erkennen (OCR)</button>
     <div id="results"></div>
+  </div>
+  <div class="panel" id="cmpPanel" style="display:none">
+    <h2>Visueller Abgleich</h2>
+    <div class="cmp">
+      <div><div class="mut" style="margin-bottom:4px">Dein Foto</div><img id="myShot" alt="Foto"></div>
+      <div><div class="mut" style="margin-bottom:4px">Referenz (TCGdex)</div><img id="refShot" alt="Referenz"></div>
+    </div>
+    <div class="mut" style="margin-top:6px">Stimmen Motiv und Set überein? Falls nicht: richtige Karte unten in der Trefferliste wählen.</div>
   </div>
   <div class="panel">
     <h2>Karten-Details</h2>
@@ -277,18 +288,20 @@ function ovLoop(){
   ctx.strokeStyle=good?'#3fbf6f':'#e05555';ctx.lineWidth=6;
   ctx.strokeRect(bx,by,bw,bh);
   b.classList.toggle('good',good);
-  if(good&&shotMode==='front'&&!cur.front&&!autoShotDone){
-    if(!goodT0)goodT0=Date.now();
-    const rem=2-(Date.now()-goodT0)/1000;
+  const now=Date.now();
+  if(good)lastGood=now;
+  if((good||now-lastGood<700)&&shotMode==='front'&&!cur.front&&!autoShotDone){
+    if(!goodT0)goodT0=lastGood;
+    const rem=1.5-(now-goodT0)/1000;
     if(rem<=0){autoShotDone=true;goodT0=null;b.textContent='📸 Aufgenommen';setTimeout(()=>snap('front'),80);}
-    else b.textContent=`✓ Still halten — Auslösung in ${rem.toFixed(1)} s`;
+    else b.textContent=`✓ Still halten — Auslösung in ${Math.max(0,rem).toFixed(1)} s`;
   }else{
-    goodT0=null;
+    if(goodT0&&now-lastGood>=700)goodT0=null;
     b.textContent=good?'✓ Karte gut platziert — auslösen':(okAr?'Karte mittiger ausrichten':'Karte gerade + mittig im Rahmen');
   }
   b.classList.remove('hidden');
 }
-let goodT0=null,autoShotDone=false;
+let goodT0=null,autoShotDone=false,lastGood=0;
 function ovStart(){if(!ovTimer)ovTimer=setInterval(ovLoop,350);}
 
 // ---------- current card state ----------
@@ -434,6 +447,9 @@ function renderCard(){
   if(c.cmUrl){bt.style.display='block';bt.onclick=()=>window.open(c.cmUrl,'_blank');}
   else{bt.style.display='none';}
   $('priceNote').textContent=c.priceNote||'';
+  const cp=$('cmpPanel');
+  if(c.imageUrl||c.disp||c.thumb){cp.style.display='block';$('myShot').src=c.disp||c.thumb||'';$('refShot').src=c.imageUrl||'';}
+  else cp.style.display='none';
   $('cmHint').textContent=c.cmUrl?'Preis = TCGPlayer-Marktwert (USD\u2192EUR umgerechnet). Cardmarket-Preise gehen ohne Login nicht \u2014 Button f\u00fchrt zur CM-Suche mit Preis-Graph.':''; 
   const dn=$('dupNote');
   if(c.dupNote){dn.style.display='block';dn.textContent='🔁 '+c.dupNote;}else dn.style.display='none';
@@ -626,18 +642,34 @@ async function tgSets(){
   return j||[];
 }
 function numKey(s){const m=(s||'').replace(/\s/g,'').match(/^0*(\d+)/);return m?m[1]:null;}
+const SETCODES={MEW:'sv03.5',SVI:'sv01',PAL:'sv02',OBF:'sv03',PAR:'sv04',TEF:'sv05',TWM:'sv06',SFA:'sv06.5',SCR:'sv07',SSP:'sv08',PRE:'sv08.5',JTG:'sv09',DRI:'sv10',PAF:'sv04.5',
+SWSH:'swsh1',RCL:'swsh2',DAA:'swsh3',VIV:'swsh4',BST:'swsh5',CRE:'swsh6',EVS:'swsh7',FST:'swsh8',BRS:'swsh9',ASR:'swsh10',PGO:'swsh10.5',LOR:'swsh11',SIT:'swsh12',CRZ:'swsh12.5',SHF:'swsh4.5',CHP:'swsh3.5',
+SM:'sm1',GRI:'sm2',BUS:'sm3',CIN:'sm4',UPR:'sm5',FLI:'sm6',CES:'sm7',LOT:'sm8',TEU:'sm9',UNB:'sm10',UNM:'sm11',CEC:'sm12',SLG:'sm3.5',DRM:'sm7.5'};
 function parseQuery(q){
-  let num=null,rest=q;
+  let num=null,rest=q,code=null;
+  const cm=q.trim().match(/^([A-Za-z]{2,5})\s*[-–]?\s*(\d{1,3})\s*(?:\/\s*\d+)?\s*(.*)$/);
+  if(cm&&SETCODES[cm[1].toUpperCase()]){code=SETCODES[cm[1].toUpperCase()];num=numKey(cm[2]);rest=cm[3]||'';return{num,rest,code};}
   const m=q.match(/(\d+)\s*(?:\/\s*\d+)?\s*$/);
   if(m){num=numKey(m[1]);rest=q.slice(0,m.index).trim();}
-  return{num,rest};
+  return{num,rest,code};
 }
 async function doSearch(q,auto){
   $('results').innerHTML='<div class="mut">Suche…</div>';
-  const{num,rest}=parseQuery(q);
+  const{num,rest,code}=parseQuery(q);
   let details=[];
   const restLc=rest.toLowerCase().replace(/&/g,'and').replace(/[^a-z0-9]+/g,' ').trim();
-  if(rest){
+  if(code){
+    const j=await fetch('https://api.tcgdex.net/v2/en/sets/'+code).then(r=>r.json()).catch(()=>null);
+    let cards=(j&&j.cards)||[];
+    if(num!=null)cards=cards.filter(x=>numKey(x.localId||'')===num);
+    details=(await Promise.all(cards.slice(0,16).map(x=>fetch('https://api.tcgdex.net/v2/en/cards/'+x.id).then(r=>r.json()).catch(()=>null)))).filter(Boolean);
+    if(rest&&details.length>1){
+      const nl=restLc;
+      const f=details.filter(x=>nl.includes((x.name||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()));
+      if(f.length)details=f;
+    }
+  }
+  else if(rest){
     // resolve set by name (fuzzy: longest set-name contained in query)
     const sets=await tgSets();
     const sorted=[...sets].sort((a,b)=>b.name.length-a.name.length);
@@ -681,7 +713,7 @@ async function doSearch(q,auto){
     d.innerHTML=`<img src="${c.image}/low.png" loading="lazy"><div class="t"><b>${esc(c.name)}</b>${esc(c.set?c.set.name:'')} · #${esc(c.localId||'')}${rar}</div><div class="p mut">Preis…</div>`;
     d.onclick=async()=>{
       cur.cardId=c.id;cur.cardName=c.name;cur.cardSet=c.set?c.set.name:'';cur.cardNum=c.localId;
-      cur.cardRarity=c.rarity||'';cur.cardDate='';
+      cur.cardRarity=c.rarity||'';cur.cardDate='';cur.imageUrl=(c.image?c.image+'/high.png':'');
       cur.cmUrl='https://www.cardmarket.com/en/Pokemon/Products/Search?searchString='+encodeURIComponent(c.name+' '+cur.cardSet);
       cur.priceRaw=null;cur.price9=null;cur.price10=null;
       cur.grade=estimate(cur);
@@ -734,7 +766,18 @@ async function ocrIdentify(){
     rc.width=Math.round(c.width*0.78);rc.height=Math.round(c.height*0.26);
     rc.getContext('2d').drawImage(c,0,0,rc.width,rc.height);
     const res=await Tesseract.recognize(rc,'eng');
-    const q=pickQueryFromText(res.data&&res.data.text||'');
+    // bottom-left: printed set code + number, e.g. "MEW 129/165"
+    const bc=document.createElement('canvas');
+    bc.width=Math.round(c.width*0.55);bc.height=Math.round(c.height*0.30);
+    bc.getContext('2d').drawImage(c,0,Math.round(c.height*0.70),bc.width,bc.height);
+    let codeQ='';
+    try{
+      const res2=await Tesseract.recognize(bc,'eng');
+      const m=((res2.data&&res2.data.text)||'').match(/\b([A-Za-z]{2,5})\s*[-–]?\s*0*(\d{1,3})\s*(?:\/\s*\d+)?/);
+      if(m&&SETCODES[m[1].toUpperCase()])codeQ=m[1].toUpperCase()+' '+m[2];
+    }catch(e){}
+    const nameQ=pickQueryFromText(res.data&&res.data.text||'');
+    let q=codeQ?codeQ+(nameQ?' '+nameQ:''):nameQ;
     if(!q){toast('Kein Kartenname erkannt — bitte manuell suchen.');return;}
     $('q').value=q;
     await doSearch(q,true);
