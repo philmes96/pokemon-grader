@@ -195,6 +195,25 @@ canvas#work{display:none}
   </div>
 </section>
 
+<!-- ============ SET-BROWSER (Set wählen, dann Nummer) ============ -->
+<section class="screen" id="scr-sets">
+  <div class="panel">
+    <h2>Set-Browser</h2>
+    <div class="mut">1. Set suchen (K&uuml;rzel oder Name, DE/EN) &rarr; 2. Nummer eingeben oder in der Liste antippen.</div>
+    <div class="setline"><input type="text" id="sbQ" placeholder="Set suchen (z.B. „Mega“ oder ASC)…" autocomplete="off"><button class="ghost" style="width:auto;margin:0" id="sbClear">✕</button></div>
+    <div id="sbSug"></div>
+    <div id="sbTools" style="display:none">
+      <div class="setline"><input type="text" id="sbNum" placeholder="Nummer filtern (z.B. 001 oder 29)…" autocomplete="off" style="margin-top:8px"><button class="ghost" style="width:auto;margin:0" id="sbSortBtn">Sort: Nummer</button></div>
+      <div class="mut" id="sbInfo" style="margin-top:6px"></div>
+    </div>
+    <div id="sbGrid" style="margin-top:8px"></div>
+  </div>
+  <div id="sbPrev" style="display:none;position:fixed;inset:0;background:#000d;z-index:60;padding:16px;overflow:auto">
+    <div style="text-align:right"><button class="ghost" id="sbPrevClose" style="width:auto;margin:0">✕ Schließen</button></div>
+    <div id="sbPrevBody" style="margin-top:8px"></div>
+  </div>
+</section>
+
 <!-- ============ LISTE ============ -->
 <section class="screen" id="scr-list">
   <div class="panel">
@@ -231,6 +250,7 @@ canvas#work{display:none}
   <button data-s="scan" class="active">📷 Erkenner</button>
   <button data-s="grade">🧪 Grading</button>
   <button data-s="lookup">🔎 Direkt-Suche</button>
+  <button data-s="sets">🗂 Set-Browser</button>
   <button data-s="list">📋 Verlauf &amp; Liste</button>
   <button data-s="set">⚙️ Setup</button>
 </div>
@@ -823,8 +843,8 @@ function luFuzzyCode(a,b){ // 1 substitute/drop erlaubt
   return false;
 }
 function luParse(q){
-  const m=(q||'').trim().match(/^([A-Za-z]{2,5})\s*[-–]?\s*(\d{1,3})(?:\s*\/\s*\d+)?$/);
-  return m?{letters:m[1].toUpperCase(),num:numKey(m[2])}:null;
+  const m=(q||'').trim().match(/^([A-Za-z]{2,5})\s*[-–]?\s*(\d{1,4})(?:\s*\/\s*\d+)?$/);
+  return m?{letters:m[1].toUpperCase(),num:m[2]}:null; // Nummer roh behalten ("001" bleibt "001")
 }
 function luRenderSug(){
   const box=$('luSug');
@@ -847,10 +867,17 @@ function luRenderSug(){
 }
 async function luShow(s,num){
   const res=$('luRes');
-  if(num==null){res.innerHTML='<div class="mut">Bitte Nummer angeben (z.B. '+esc(s.code)+' 129).</div>';return;}
+  if(num==null){res.innerHTML='<div class="mut">Bitte Nummer angeben (z.B. '+esc(s.code)+' 129 oder 001).</div>';return;}
   res.innerHTML='<div class="mut">Lade Karte '+esc(s.code)+' '+num+' …</div>';
-  const c=await fetch('https://api.tcgdex.net/v2/en/cards/'+s.id+'-'+num).then(r=>r.json()).catch(()=>null);
+  // Karten-IDs können mit führenden Nullen gepaddet sein oder nicht — beide Varianten probieren
+  const cands=[...new Set([num,num.replace(/^0+/,''),num.replace(/^0+/,'').padStart(3,'0')])];
+  let c=null;
+  for(const cand of cands){
+    c=await fetch('https://api.tcgdex.net/v2/en/cards/'+s.id+'-'+cand).then(r=>r.json()).catch(()=>null);
+    if(c&&c.name)break;
+  }
   if(!c||!c.name){res.innerHTML='<div class="mut">Keine Karte '+esc(s.code)+' #'+num+' gefunden — Nummer prüfen.</div>';return;}
+  num=c.localId||num;
   const setNames=s.en+(s.de?' ('+s.de+')':'');
   res.innerHTML='<div class="res" style="align-items:center"><img src="'+(c.image?c.image+'/low.png':'')+'" alt=""><div class="t"><b>'+esc(c.name)+'</b>'+esc(setNames)+'<br>#'+esc(c.localId||num)+(c.rarity?' · '+esc(c.rarity):'')+'</div></div>'
     +'<div class="row"><span class="k">Karte</span><span class="v">'+esc(c.name)+'</span></div>'
@@ -898,6 +925,125 @@ async function luGo(){
 $('luQ').oninput=()=>luRenderSug();
 $('luQ').onkeydown=e=>{if(e.key==='Enter')luGo();};
 $('luGo').onclick=()=>luGo();
+
+// ---------- Set-Browser: Set suchen -> Kartenliste -> Nummer filtern -> Preissortierung ----------
+const sb={set:null,cards:[],prices:null,sort:'num'};
+async function sbLoadSets(){return luLoadSets();}
+function sbRenderSug(){
+  const box=$('sbSug');
+  const f=$('sbQ').value.trim().toLowerCase();
+  if(!f){box.innerHTML='';return;}
+  const sets=luSets||[];
+  let hits=sets.filter(s=>s.code.toLowerCase().startsWith(f)||s.en.toLowerCase().includes(f)||(s.de&&s.de.toLowerCase().includes(f)));
+  if(!hits.length)hits=sets.filter(s=>luFuzzyCode(s.code.toLowerCase(),f));
+  hits=hits.slice(0,8);
+  if(!hits.length){box.innerHTML='<div class="mut">Kein Set gefunden.</div>';return;}
+  box.innerHTML='';
+  hits.forEach(x=>{
+    const b=document.createElement('button');
+    b.style.cssText='display:block;width:100%;text-align:left;margin-top:4px;';
+    b.innerHTML='<b>'+esc(x.code)+'</b> · '+esc(x.en)+(x.de?' <span class="mut">('+esc(x.de)+')</span>':'');
+    b.onclick=()=>{$('sbQ').value=x.code+' · '+x.en;sbSelect(x);};
+    box.appendChild(b);
+  });
+}
+async function sbSelect(s){
+  sb.set=s;sb.cards=[];sb.prices=null;sb.sort='num';
+  $('sbSug').innerHTML='<div class="mut">Lade Set „'+esc(s.en)+'“ …</div>';
+  $('sbTools').style.display='block';$('sbSortBtn').textContent='Sort: Nummer';
+  $('sbInfo').textContent='';
+  const j=await fetch('https://api.tcgdex.net/v2/en/sets/'+s.id).then(r=>r.json()).catch(()=>null);
+  if(!j||!j.cards){$('sbSug').innerHTML='<div class="mut">Set konnte nicht geladen werden.</div>';return;}
+  sb.cards=(j.cards||[]).slice().sort((a,b)=>(numKey(a.localId)||0)-(numKey(b.localId)||0));
+  $('sbSug').innerHTML='';
+  $('sbInfo').textContent=s.code+' · '+s.en+(s.de?' ('+s.de+')':'')+' — '+sb.cards.length+' Karten. Preise laden…';
+  sbRenderGrid();
+  try{
+    const usd=await sbPrices(s.id);
+    sb.prices=usd||{};
+  }catch(e){sb.prices={};}
+  const rate=await fxRate();
+  sb.rate=rate||0.92;
+  $('sbInfo').textContent=s.code+' · '+s.en+(s.de?' ('+s.de+')':'')+' — '+sb.cards.length+' Karten'+(Object.keys(sb.prices).length?' · Preise geladen':' · keine Preise verfügbar');
+  sbRenderGrid();
+}
+async function sbPrices(setId){
+  const groups=await tgGroups();
+  const g=setMatch(groups,{set:{id:setId}});
+  if(!g)return null;
+  const prod=await fetch('https://tcgcsv.com/tcgplayer/3/'+g.groupId+'/products').then(r=>r.json());
+  const numMap=new Map();
+  (prod.results||[]).forEach(pt=>{
+    const e=(pt.extendedData||[]).find(x=>x.name==='Number');
+    const v=e&&numKey(e.value);
+    if(v&&!numMap.has(v))numMap.set(v,pt.productId);
+  });
+  const pr2=await fetch('https://tcgcsv.com/tcgplayer/3/'+g.groupId+'/prices').then(r=>r.json());
+  const byId=new Map((pr2.results||[]).map(x=>[x.productId,x]));
+  const out={};
+  for(const [v,pid] of numMap){
+    const row=byId.get(pid);
+    if(row&&row.marketPrice)out[v]=row.marketPrice;
+  }
+  return out;
+}
+function sbCardPrice(c){
+  const v=numKey(c.localId);
+  if(sb.prices&&sb.prices[v]!=null)return sb.prices[v]*sb.rate;
+  return null;
+}
+function sbRenderGrid(){
+  const g=$('sbGrid');g.innerHTML='';
+  if(!sb.set)return;
+  const f=numKey($('sbNum').value);
+  let cards=sb.cards.filter(c=>!f||numKey(c.localId)===f);
+  if(sb.sort!=='num'){
+    cards=cards.slice().sort((a,b)=>{
+      const pa=sbCardPrice(a),pb=sbCardPrice(b);
+      if(pa==null&&pb==null)return (numKey(a.localId)||0)-(numKey(b.localId)||0);
+      if(pa==null)return 1;if(pb==null)return -1;
+      return sb.sort==='priceAsc'?pa-pb:pb-pa;
+    });
+  }
+  if(!cards.length){g.innerHTML='<div class="mut">Keine Karten für diese Nummer.</div>';return;}
+  cards.forEach(c=>{
+    const price=sbCardPrice(c);
+    const d=document.createElement('div');d.className='res';
+    d.innerHTML='<img src="'+(c.image?c.image+'/low.png':'')+'" loading="lazy" alt="">'
+      +'<div class="t"><b>'+esc(sb.set.code)+' '+esc(c.localId||'')+'</b> · '+esc(c.name||'')+(price!=null?'<br><span class="mut">'+eur(price)+'</span>':'')+'</div>';
+    d.onclick=()=>sbPreview(c);
+    g.appendChild(d);
+  });
+}
+function sbPreview(c){
+  const price=sbCardPrice(c);
+  $('sbPrevBody').innerHTML='<div style="text-align:center"><img src="'+(c.image?c.image+'/high.png':'')+'" style="max-width:min(92vw,420px);border-radius:12px" alt=""></div>'
+    +'<div class="panel" style="margin-top:10px">'
+    +'<div class="row"><span class="k">Karte</span><span class="v">'+esc(c.name||'')+'</span></div>'
+    +'<div class="row"><span class="k">Set</span><span class="v">'+esc(sb.set.code+' · '+sb.set.en)+(sb.set.de?' ('+esc(sb.set.de)+')':'')+'</span></div>'
+    +'<div class="row"><span class="k">Nummer</span><span class="v">'+esc(sb.set.code)+' '+esc(c.localId||'')+'</span></div>'
+    +(c.rarity?'<div class="row"><span class="k">Seltenheit</span><span class="v">'+esc(c.rarity)+'</span></div>':'')
+    +'<div class="row"><span class="k">Marktwert (EUR)</span><span class="v">'+(price!=null?eur(price):'–')+'</span></div>'
+    +'<button class="ghost" id="sbAdopt" style="margin-top:8px">→ Für Grading übernehmen</button></div>';
+  $('sbPrev').style.display='block';
+  $('sbAdopt').onclick=()=>{
+    cur.cardId=c.id;cur.cardName=c.name;cur.cardSet=sb.set.en;cur.cardNum=c.localId;
+    cur.cardRarity=c.rarity||'';cur.imageUrl=c.image?c.image+'/high.png':'';
+    cur.cmUrl='https://www.cardmarket.com/de/Pokemon/Products/Search?searchString='+encodeURIComponent((c.name||'')+' '+sb.set.en);
+    renderCard();nav('ident');sbClosePrev();
+  };
+}
+function sbClosePrev(){$('sbPrev').style.display='none';}
+$('sbQ').oninput=async()=>{await sbLoadSets();sbRenderSug();};
+$('sbClear').onclick=()=>{$('sbQ').value='';$('sbSug').innerHTML='';$('sbTools').style.display='none';$('sbGrid').innerHTML='';sb.set=null;};
+$('sbNum').oninput=()=>sbRenderGrid();
+$('sbSortBtn').onclick=()=>{
+  sb.sort=sb.sort==='num'?'priceDesc':sb.sort==='priceDesc'?'priceAsc':'num';
+  $('sbSortBtn').textContent='Sort: '+(sb.sort==='num'?'Nummer':sb.sort==='priceDesc'?'Preis absteigend':'Preis aufsteigend');
+  sbRenderGrid();
+};
+$('sbPrevClose').onclick=sbClosePrev;
+$('sbPrev').onclick=e=>{if(e.target.id==='sbPrev')sbClosePrev();};
 
 // ---------- OCR auto-identify ----------
 let tessLoaded=false,tw=null;
