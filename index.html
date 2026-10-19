@@ -284,6 +284,13 @@ function ovLoop(){
   const gx=(W-gw)/2,gy=(H-gh)/2;
   ctx.setLineDash([14,10]);ctx.strokeStyle='rgba(255,255,255,0.35)';ctx.lineWidth=4;
   ctx.strokeRect(gx,gy,gw,gh);ctx.setLineDash([]);
+  // Set-Code-Zone unten links markieren
+  const sbx=gx+gw*0.055,sbw=gw*0.30,sby=gy+gh*0.915,sbh=gh*0.052;
+  ctx.fillStyle='rgba(255,214,64,0.16)';ctx.fillRect(sbx,sby,sbw,sbh);
+  ctx.setLineDash([8,6]);ctx.strokeStyle='rgba(255,214,64,0.9)';ctx.lineWidth=3;
+  ctx.strokeRect(sbx,sby,sbw,sbh);ctx.setLineDash([]);
+  ctx.fillStyle='rgba(255,214,64,0.95)';ctx.font=`${Math.round(W*0.022)}px sans-serif`;ctx.textAlign='left';
+  ctx.fillText('Set-Code hier (unten links)',sbx,sby-W*0.012);
   if(maxX<=minX||cnt<40){b.classList.remove('good');b.textContent='Karte in den Rahmen halten';b.classList.remove('hidden');return;}
   const sc=W/c.width;
   const bx=minX*sc,by=minY*sc,bw=(maxX-minX)*sc,bh=(maxY-minY)*sc;
@@ -718,7 +725,7 @@ async function doSearch(q,auto){
   details.forEach(c=>{
     const d=document.createElement('div');d.className='res';
     const rar=c.rarity?` · ${esc(c.rarity)}`:'';
-    d.innerHTML=`<img src="${c.image}/low.png" loading="lazy"><div class="t"><b>${esc(c.name)}</b>${esc(c.set?c.set.name:'')} · #${esc(c.localId||'')}${rar}</div><div class="p mut">Preis…</div>`;
+    d.innerHTML=`<img src="${c.image}/low.png" loading="lazy"><div class="t"><b>${esc(c.name)}</b>${esc(c.set?c.set.name:'')} · #${esc(c.localId||'')}${rar}</div><div class="p mut">${details.length===1&&auto?'Preis wird geladen…':'Preis: Karte antippen'}</div>`;
     d.onclick=async()=>{
       cur.cardId=c.id;cur.cardName=c.name;cur.cardSet=c.set?c.set.name:'';cur.cardNum=c.localId;
       cur.cardRarity=c.rarity||'';cur.cardDate='';cur.imageUrl=(c.image?c.image+'/high.png':'');
@@ -801,41 +808,70 @@ function findSetBox(card){
   const strip=grayCanvas(card,0,y0,W,H-y0,1);
   const d=strip.getContext('2d',{willReadFrequently:true}).getImageData(0,0,W,H-y0).data;
   const SH=H-y0;
-  const dark=new Uint8Array(W*SH);
-  for(let i=0;i<W*SH;i++)dark[i]=luma(d,i*4)<95?1:0;
-  const lab=new Int32Array(W*SH);const comps=[];const stack=[];
-  for(let i=0;i<W*SH;i++){
-    if(dark[i]&&!lab[i]){
-      let minx=W,maxx=0,miny=SH,maxy=0,cnt=0;
-      stack.push(i);lab[i]=1;
-      while(stack.length){
-        const p=stack.pop();cnt++;
-        const px=p%W,py=(p/W)|0;
-        if(px<minx)minx=px;if(px>maxx)maxx=px;
-        if(py<miny)miny=py;if(py>maxy)maxy=py;
-        if(px>0&&dark[p-1]&&!lab[p-1]){lab[p-1]=1;stack.push(p-1);}
-        if(px<W-1&&dark[p+1]&&!lab[p+1]){lab[p+1]=1;stack.push(p+1);}
-        if(py>0&&dark[p-W]&&!lab[p-W]){lab[p-W]=1;stack.push(p-W);}
-        if(py<SH-1&&dark[p+W]&&!lab[p+W]){lab[p+W]=1;stack.push(p+W);}
-      }
-      comps.push({minx,maxx,miny,maxy,cnt});
-    }
-  }
-  const minW=Math.round(W*0.035),maxW=Math.round(W*0.18);
-  const minH=Math.round(SH*0.04),maxH=Math.round(SH*0.30);
+  const mk=(test)=>{const m=new Uint8Array(W*SH);
+    for(let i=0;i<W*SH;i++){const r=d[i*4],g=d[i*4+1],b=d[i*4+2];
+      const L=0.299*r+0.587*g+0.114*b;
+      const mx=Math.max(r,g,b),mn=Math.min(r,g,b);
+      const sat=mx>0?(mx-mn)/mx:0;
+      m[i]=test(L,sat)?1:0;}
+    return m;};
+  // three masks: black box (standard), white box (dark full-arts), colored/gold box
+  const masks=[
+    {mode:'dark',m:mk((L,sat)=>L<110&&sat<0.55)},
+    {mode:'bright',m:mk((L,sat)=>L>210&&sat<0.25)},
+    {mode:'color',m:mk((L,sat)=>sat>0.45&&L>60&&L<220)}
+  ];
   const cand=[];
-  for(const c of comps){
-    const w=c.maxx-c.minx+1,h=c.maxy-c.miny+1;
-    if(w<minW||w>maxW||h<minH||h>maxH)continue;
-    const fill=c.cnt/(w*h);
-    if(fill<0.5||c.maxy>=SH-2)continue;
-    let bright=0,tot=0;
-    for(let yy=c.miny;yy<=c.maxy;yy++)for(let xx=c.minx;xx<=c.maxx;xx++){
-      const l=luma(d,(yy*W+xx)*4);tot++;if(l>170)bright++;
+  for(const {mode,m:dark} of masks){
+    const comps=[];const lab=new Int32Array(W*SH);const stack=[];
+    for(let i=0;i<W*SH;i++){
+      if(dark[i]&&!lab[i]){
+        let minx=W,maxx=0,miny=SH,maxy=0,cnt=0;
+        stack.push(i);lab[i]=1;
+        while(stack.length){
+          const p=stack.pop();cnt++;
+          const px=p%W,py=(p/W)|0;
+          if(px<minx)minx=px;if(px>maxx)maxx=px;
+          if(py<miny)miny=py;if(py>maxy)maxy=py;
+          if(px>0&&dark[p-1]&&!lab[p-1]){lab[p-1]=1;stack.push(p-1);}
+          if(px<W-1&&dark[p+1]&&!lab[p+1]){lab[p+1]=1;stack.push(p+1);}
+          if(py>0&&dark[p-W]&&!lab[p-W]){lab[p-W]=1;stack.push(p-W);}
+          if(py<SH-1&&dark[p+W]&&!lab[p+W]){lab[p+W]=1;stack.push(p+W);}
+        }
+        comps.push({minx,maxx,miny,maxy,cnt,mode});
+      }
     }
-    const bp=bright/tot;
-    if(bp<0.004||bp>0.40)continue;
-    cand.push({x:c.minx,y:y0+c.miny,w,h,fill:Math.round(fill*100)/100,brightPct:Math.round(bp*1000)/10});
+    // glyphs inside split the box into fragments: merge fragments on the same line
+    const parent=comps.map((_,i)=>i);
+    const find=i=>{while(parent[i]!==i){parent[i]=parent[parent[i]];i=parent[i];}return i;};
+    const uni=(a,b)=>{a=find(a);b=find(b);if(a!==b)parent[b]=a;};
+    for(let i=0;i<comps.length;i++)for(let j=i+1;j<comps.length;j++){
+      const a=comps[i],b=comps[j];
+      const vo=Math.min(a.maxy,b.maxy)-Math.max(a.miny,b.miny);
+      const hmin=Math.min(a.maxy-a.miny,b.maxy-b.miny)+1;
+      const gap=Math.max(a.minx,b.minx)-Math.min(a.maxx,b.maxx);
+      if(vo>=hmin*0.5&&gap<=Math.round(W*0.05))uni(i,j);
+    }
+    const groups={};
+    comps.forEach((c,i)=>{const r=find(i);(groups[r]=groups[r]||[]).push(c);});
+    for(const g of Object.values(groups)){
+      let minx=W,maxx=0,miny=SH,maxy=0,cnt=0;
+      g.forEach(c=>{minx=Math.min(minx,c.minx);maxx=Math.max(maxx,c.maxx);miny=Math.min(miny,c.miny);maxy=Math.max(maxy,c.maxy);cnt+=c.cnt;});
+      const w=maxx-minx+1,h=maxy-miny+1;
+      const minW=Math.round(W*0.035),maxW=Math.round(W*0.20);
+      const minH=Math.round(H*0.015),maxH=Math.round(H*0.06);
+      if(w<minW||w>maxW||h<minH||h>maxH)continue;
+      const fill=cnt/(w*h);
+      if(fill<0.42)continue;
+      let glyph=0,tot=0;
+      for(let yy=miny;yy<=maxy;yy++)for(let xx=minx;xx<=maxx;xx++){
+        const l=luma(d,(yy*W+xx)*4);tot++;
+        glyph+= mode==='dark'?(l>165?1:0):(l<130?1:0);
+      }
+      const bp=glyph/tot;
+      if(bp<0.005||bp>0.45)continue;
+      cand.push({x:minx,y:y0+miny,w,h,fill:Math.round(fill*100)/100,brightPct:Math.round(bp*1000)/10,mode});
+    }
   }
   cand.sort((a,b)=>(a.x-b.x)||(b.fill-a.fill));
   return cand.length?{cands:cand.slice(0,4)}:null;
@@ -853,7 +889,8 @@ async function ocrSetLetters(card,box){
     for(let i=0;i<d.data.length;i+=4){const L=luma(d.data,i);const v=(L>o.t)===!!inv?0:255;d2.data[i]=d2.data[i+1]=d2.data[i+2]=v;d2.data[i+3]=255;}
     x2.putImageData(d2,0,0);return c2;};
   let fb='',fbRaw='';
-  for(const c2 of [mk(true),mk(false)]){
+  const firstInv=box.mode!=='dark';
+  for(const c2 of [firstInv?mk(true):mk(false),firstInv?mk(false):mk(true)]){
     for(const psm of ['7','8']){
       try{
         await w.setParameters({tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ',tessedit_pageseg_mode:psm});
