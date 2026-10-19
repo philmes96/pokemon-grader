@@ -602,10 +602,11 @@ $('btnHistClear').onclick=()=>{
 
 // ---------- API (keyless: TCGdex für Karten, TCGCSV für TCGPlayer-Preise) ----------
 async function tgGroups(){
-  if(DB.settings.groupsCache&&Date.now()-DB.settings.groupsCache.ts<7*864e5)return DB.settings.groupsCache.data;
-  const r=await fetch('/tcgcsv/3/groups');
+  if(DB.settings.groupsCache&&DB.settings.groupsCache.ok&&Date.now()-DB.settings.groupsCache.ts<7*864e5)return DB.settings.groupsCache.data;
+  const r=await fetch('https://tcgcsv.com/tcgplayer/3/groups');
   const j=await r.json();
-  DB.settings.groupsCache={ts:Date.now(),data:j.results||[]};save();
+  if(!j||!j.results||!j.results.length)throw new Error('groups leer');
+  DB.settings.groupsCache={ts:Date.now(),ok:true,data:j.results};save();
   return j.results||[];
 }
 async function fxRate(){
@@ -635,7 +636,7 @@ async function cardPrice(c){
     const groups=await tgGroups();
     const g=setMatch(groups,c);
     if(!g)return{note:'Set "'+((c.set&&c.set.name)||'?')+'" bei TCGPlayer nicht gefunden'};
-    const prod=await fetch('/tcgcsv/3/'+g.groupId+'/products').then(r=>r.json());
+    const prod=await fetch('https://tcgcsv.com/tcgplayer/3/'+g.groupId+'/products').then(r=>r.json());
     const num=(norm(c.localId).match(/^0*(\d+)/)||[])[1]||norm(c.localId);
     const prods=(prod.results||[]).filter(pt=>{
       const e=(pt.extendedData||[]).find(x=>x.name==='Number');
@@ -643,7 +644,7 @@ async function cardPrice(c){
       return v&&v===num;
     });
     if(!prods.length)return{note:'Karte #'+c.localId+' im Set "'+g.name+'" nicht gefunden'};
-    const pr2=await fetch('/tcgcsv/3/'+g.groupId+'/prices').then(r=>r.json());
+    const pr2=await fetch('https://tcgcsv.com/tcgplayer/3/'+g.groupId+'/prices').then(r=>r.json());
     const byId=new Map((pr2.results||[]).map(x=>[x.productId,x]));
     const row=prods.map(pt=>byId.get(pt.productId)).find(v=>v&&v.marketPrice);
     const url='https://www.tcgplayer.com/product/'+prods[0].productId;
@@ -708,17 +709,33 @@ async function doSearch(q,auto){
       details=(await Promise.all(cards.slice(0,16).map(x=>fetch('https://api.tcgdex.net/v2/en/cards/'+x.id).then(r=>r.json()).catch(()=>null)))).filter(Boolean);
     }else{
       let list=[];
+      // Namens-OCR ist oft ungenau: schrittweise kürzen bis ein Treffer kommt (z.B. "Maganbya" -> "Mag" -> Magby)
       try{
-        const r=await fetch('https://api.tcgdex.net/v2/en/cards?name='+encodeURIComponent(rest));
-        const j=await r.json();
-        if(Array.isArray(j))list=j;
+        let nameQ=rest;
+        for(let i=0;i<5;i++){
+          const r=await fetch('https://api.tcgdex.net/v2/en/cards?name='+encodeURIComponent(nameQ));
+          const j=await r.json();
+          if(Array.isArray(j)&&j.length){list=j;break;}
+          if(nameQ.length<=3)break;
+          nameQ=nameQ.slice(0,-1);
+        }
       }catch(e){}
       list=list.filter(x=>x.image).slice(0,24);
       if(num!=null)list=list.filter(x=>numKey((x.id||'').split('-').pop())===num);
       details=(await Promise.all(list.slice(0,16).map(x=>fetch('https://api.tcgdex.net/v2/en/cards/'+x.id).then(r=>r.json()).catch(()=>null)))).filter(Boolean);
     }
   }else if(num!=null){
-    $('results').innerHTML='<div class="mut">Nur Nummer reicht nicht — bitte Set oder Kartenname mit angeben (z.B. "Vivid Voltage 44").</div>';return;
+    const sets=await tgSets();
+    const box=$('results');box.innerHTML='';
+    const hint=document.createElement('div');hint.className='mut';
+    hint.textContent='Nummer '+num+' erkannt, aber Set/Name nicht. Set auswählen — Preis erscheint dann direkt.';
+    const sel=document.createElement('select');
+    sel.innerHTML='<option value="">— Set wählen —</option>'+sets.map(s=>'<option value="'+esc(s.id)+'">'+esc(s.name)+'</option>').join('');
+    sel.style.width='100%';sel.style.marginTop='8px';
+    const b=document.createElement('button');b.textContent='Diese Nummer suchen';b.style.marginTop='8px';
+    b.onclick=()=>{const s=sets.find(x=>x.id===sel.value);if(s)doSearch(s.name+' '+num,auto);};
+    box.appendChild(hint);box.appendChild(sel);box.appendChild(b);
+    return;
   }
   details.sort((a,b)=>(a.id<b.id?-1:1));
   if(!details.length){$('results').innerHTML='<div class="mut">Keine Treffer. Tipp: Set-Name + Nummer, z.B. "Obsidian Flames 199".</div>';return;}
@@ -730,7 +747,7 @@ async function doSearch(q,auto){
     d.onclick=async()=>{
       cur.cardId=c.id;cur.cardName=c.name;cur.cardSet=c.set?c.set.name:'';cur.cardNum=c.localId;
       cur.cardRarity=c.rarity||'';cur.cardDate='';cur.imageUrl=(c.image?c.image+'/high.png':'');
-      cur.cmUrl='https://www.cardmarket.com/en/Pokemon/Products/Search?searchString='+encodeURIComponent(c.name+' '+cur.cardSet);
+      cur.cmUrl='https://www.cardmarket.com/de/Pokemon/Products/Search?searchString='+encodeURIComponent(c.name+' '+cur.cardSet);
       cur.priceRaw=null;cur.price9=null;cur.price10=null;
       cur.grade=estimate(cur);
       const dup=DB.cards.find(x=>(c.id&&x.cardId===c.id)||(x.cardName===c.name&&x.cardSet===cur.cardSet&&x.cardNum===cur.cardNum));
@@ -747,13 +764,13 @@ async function doSearch(q,auto){
       cur.grade=estimate(cur);
       renderCard();
     };
-    if(auto&&details.length===1)d.onclick();
+    if(details.length===1||(code&&details.length>1))d.onclick();
     box.appendChild(d);
   });
   // Cardmarket-Link schon im Hintergrund bereitstellen (Top-Treffer), bevor der User tippt
   if(!cur.cardId&&details.length){
     const c0=details[0];
-    cur.cmUrl='https://www.cardmarket.com/en/Pokemon/Products/Search?searchString='+encodeURIComponent(c0.name+' '+(c0.set?c0.set.name:''));
+    cur.cmUrl='https://www.cardmarket.com/de/Pokemon/Products/Search?searchString='+encodeURIComponent(c0.name+' '+(c0.set?c0.set.name:''));
     renderCard();
   }
 }
