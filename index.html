@@ -690,9 +690,20 @@ async function tgSets(){
   return j||[];
 }
 function numKey(s){const m=(s||'').replace(/\s/g,'').match(/^0*(\d+)/);return m?m[1]:null;}
+function cmUrlFor(c){
+  // CM findet Karten am zuverlässigsten über "SETCODE Nummer" (z.B. "MEW 149"), nicht über Namen
+  const id=(c.id||'').toLowerCase();
+  const dash=id.indexOf('-');
+  const setId=dash>0?id.slice(0,dash):null;
+  const appCode=(setId&&CODE_REV[setId])||null;
+  const num=String(c.localId||'').replace(/^0+(?=\d)/,'')||(dash>0?id.slice(dash+1):'');
+  const q=appCode?(appCode+' '+num):((c.name||'')+' '+(c.set?c.set.name:''));
+  return 'https://www.cardmarket.com/de/Pokemon/Products/Search?searchString='+encodeURIComponent(q);
+}
 const SETCODES={MEW:'sv03.5',SVI:'sv01',PAL:'sv02',OBF:'sv03',PAR:'sv04',TEF:'sv05',TWM:'sv06',SFA:'sv06.5',SCR:'sv07',SSP:'sv08',PRE:'sv08.5',JTG:'sv09',DRI:'sv10',PAF:'sv04.5',
 SWSH:'swsh1',RCL:'swsh2',DAA:'swsh3',VIV:'swsh4',BST:'swsh5',CRE:'swsh6',EVS:'swsh7',FST:'swsh8',BRS:'swsh9',ASR:'swsh10',PGO:'swsh10.5',LOR:'swsh11',SIT:'swsh12',CRZ:'swsh12.5',SHF:'swsh4.5',CHP:'swsh3.5',
 SM:'sm1',GRI:'sm2',BUS:'sm3',CIN:'sm4',UPR:'sm5',FLI:'sm6',CES:'sm7',LOT:'sm8',TEU:'sm9',UNB:'sm10',UNM:'sm11',CEC:'sm12',SLG:'sm3.5',DRM:'sm7.5',BLK:'sv10.5b',WHT:'sv10.5w',MEG:'me01',PFL:'me02',ASC:'me02.5',POR:'me03',CRI:'me04'};
+const CODE_REV={};for(const k in SETCODES)CODE_REV[SETCODES[k]]=k;
 function parseQuery(q){
   let num=null,rest=q,code=null;
   const cm=q.trim().match(/^([A-Za-z]{2,5})\s*[-–]?\s*(\d{1,3})\s*(?:\/\s*\d+)?\s*(.*)$/);
@@ -794,7 +805,7 @@ async function doSearch(q,auto){
     d.onclick=async()=>{
       cur.cardId=c.id;cur.cardName=c.name;cur.cardSet=c.set?c.set.name:'';cur.cardNum=c.localId;
       cur.cardRarity=c.rarity||'';cur.cardDate='';cur.imageUrl=(c.image?c.image+'/high.png':'');
-      cur.cmUrl='https://www.cardmarket.com/de/Pokemon/Products/Search?searchString='+encodeURIComponent(c.name+' '+cur.cardSet);
+      cur.cmUrl=cmUrlFor(c);
       cur.priceRaw=null;cur.price9=null;cur.price10=null;
       cur.grade=estimate(cur);
       const dup=DB.cards.find(x=>(c.id&&x.cardId===c.id)||(x.cardName===c.name&&x.cardSet===cur.cardSet&&x.cardNum===cur.cardNum));
@@ -817,7 +828,7 @@ async function doSearch(q,auto){
   // Cardmarket-Link schon im Hintergrund bereitstellen (Top-Treffer), bevor der User tippt
   if(!cur.cardId&&details.length){
     const c0=details[0];
-    cur.cmUrl='https://www.cardmarket.com/de/Pokemon/Products/Search?searchString='+encodeURIComponent(c0.name+' '+(c0.set?c0.set.name:''));
+    cur.cmUrl=cmUrlFor(c0);
     renderCard();
   }
 }
@@ -887,11 +898,11 @@ async function luShow(s,num){
     +'<div class="row"><span class="k">≈ PSA 9 / 10</span><span class="v" id="luP910">–</span></div>'
     +'<button class="ghost" id="luCm" style="margin-top:8px">🔗 Cardmarket öffnen (Preis-Graph)</button>'
     +'<button class="ghost" id="luAdopt" style="margin-top:6px">→ Für Grading übernehmen</button>';
-  $('luCm').onclick=()=>window.open('https://www.cardmarket.com/de/Pokemon/Products/Search?searchString='+encodeURIComponent(c.name+' '+s.en),'_blank');
+  $('luCm').onclick=()=>window.open(cmUrlFor(c),'_blank');
   $('luAdopt').onclick=()=>{
     cur.cardId=c.id;cur.cardName=c.name;cur.cardSet=s.en;cur.cardNum=c.localId||String(num);
     cur.cardRarity=c.rarity||'';cur.imageUrl=c.image?c.image+'/high.png':'';
-    cur.cmUrl='https://www.cardmarket.com/de/Pokemon/Products/Search?searchString='+encodeURIComponent(c.name+' '+s.en);
+  cur.cmUrl=cmUrlFor(c);
     renderCard();nav('ident');
   };
   try{
@@ -1024,12 +1035,14 @@ function sbPreview(c){
     +'<div class="row"><span class="k">Nummer</span><span class="v">'+esc(sb.set.code)+' '+esc(c.localId||'')+'</span></div>'
     +(c.rarity?'<div class="row"><span class="k">Seltenheit</span><span class="v">'+esc(c.rarity)+'</span></div>':'')
     +'<div class="row"><span class="k">Marktwert (EUR)</span><span class="v">'+(price!=null?eur(price):'–')+'</span></div>'
-    +'<button class="ghost" id="sbAdopt" style="margin-top:8px">→ Für Grading übernehmen</button></div>';
+    +'<button class="primary" id="sbCm" style="margin-top:10px">🔗 Cardmarket öffnen</button>'
+    +'<button class="ghost" id="sbAdopt" style="margin-top:6px">→ Für Grading übernehmen</button></div>';
   $('sbPrev').style.display='block';
+  $('sbCm').onclick=()=>window.open(cmUrlFor(c),'_blank');
   $('sbAdopt').onclick=()=>{
     cur.cardId=c.id;cur.cardName=c.name;cur.cardSet=sb.set.en;cur.cardNum=c.localId;
     cur.cardRarity=c.rarity||'';cur.imageUrl=c.image?c.image+'/high.png':'';
-    cur.cmUrl='https://www.cardmarket.com/de/Pokemon/Products/Search?searchString='+encodeURIComponent((c.name||'')+' '+sb.set.en);
+  cur.cmUrl=cmUrlFor(c);
     renderCard();nav('ident');sbClosePrev();
   };
 }
