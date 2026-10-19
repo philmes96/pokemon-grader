@@ -1,0 +1,9 @@
+# Proxy für TCGCSV (TCGPlayer-Preise): TCGCSV sendet keinen
+# Access-Control-Allow-Origin-Header, daher schlagen direkte
+# Browser-Fetches fehl. Die App fragt /tcgcsv/... relativ ab und
+# Netlify leitet transparent auf tcgcsv.com weiter.
+[[redirects]]
+  from = "/tcgcsv/*"
+  to = "https://tcgcsv.com/tcgplayer/:splat"
+  status = 200
+  force = true

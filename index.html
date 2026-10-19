@@ -103,6 +103,7 @@ canvas#work{display:none}
 <!-- ============ ERKENNER (Identifikation) ============ -->
 <section class="screen" id="scr-ident">
   <div id="curName" class="big" style="margin:6px 0">Neue Karte</div>
+  <button id="btnCm" style="display:none;margin:8px 0;background:var(--accent,#f7c948);color:#111;font-weight:700;border:0;border-radius:10px;padding:10px 14px;width:100%">🔗 Cardmarket öffnen (Preis-Graph)</button>
   <div class="okbox" id="dupNote" style="display:none"></div>
   <div class="panel">
     <h2>Karte identifizieren</h2>
@@ -176,7 +177,6 @@ canvas#work{display:none}
     <div class="row"><span class="k">≈ PSA 10 (gem)</span><span class="v" id="v10">–</span></div>
     <div class="row"><span class="k">Gradings-Kosten (PSA + Versand ca.)</span><span class="v">~23 €</span></div>
     <div class="okbox" id="vVerdict" style="display:none"></div>
-    <button class="ghost" id="btnCm" style="display:none">🔗 Auf Cardmarket suchen (Preis-Graph gegenprüfen)</button>
     <div class="mut" id="priceNote" style="color:var(--warn)"></div><div class="mut" id="cmHint"></div>
   </div>
   <button class="ghost" id="btnBackIdent">← Zurück zur Identifikation</button>
@@ -603,7 +603,7 @@ $('btnHistClear').onclick=()=>{
 // ---------- API (keyless: TCGdex für Karten, TCGCSV für TCGPlayer-Preise) ----------
 async function tgGroups(){
   if(DB.settings.groupsCache&&Date.now()-DB.settings.groupsCache.ts<7*864e5)return DB.settings.groupsCache.data;
-  const r=await fetch('https://tcgcsv.com/tcgplayer/3/groups');
+  const r=await fetch('/tcgcsv/3/groups');
   const j=await r.json();
   DB.settings.groupsCache={ts:Date.now(),data:j.results||[]};save();
   return j.results||[];
@@ -635,7 +635,7 @@ async function cardPrice(c){
     const groups=await tgGroups();
     const g=setMatch(groups,c);
     if(!g)return{note:'Set "'+((c.set&&c.set.name)||'?')+'" bei TCGPlayer nicht gefunden'};
-    const prod=await fetch('https://tcgcsv.com/tcgplayer/3/'+g.groupId+'/products').then(r=>r.json());
+    const prod=await fetch('/tcgcsv/3/'+g.groupId+'/products').then(r=>r.json());
     const num=(norm(c.localId).match(/^0*(\d+)/)||[])[1]||norm(c.localId);
     const prods=(prod.results||[]).filter(pt=>{
       const e=(pt.extendedData||[]).find(x=>x.name==='Number');
@@ -643,7 +643,7 @@ async function cardPrice(c){
       return v&&v===num;
     });
     if(!prods.length)return{note:'Karte #'+c.localId+' im Set "'+g.name+'" nicht gefunden'};
-    const pr2=await fetch('https://tcgcsv.com/tcgplayer/3/'+g.groupId+'/prices').then(r=>r.json());
+    const pr2=await fetch('/tcgcsv/3/'+g.groupId+'/prices').then(r=>r.json());
     const byId=new Map((pr2.results||[]).map(x=>[x.productId,x]));
     const row=prods.map(pt=>byId.get(pt.productId)).find(v=>v&&v.marketPrice);
     const url='https://www.tcgplayer.com/product/'+prods[0].productId;
@@ -669,6 +669,7 @@ function parseQuery(q){
   return{num,rest,code};
 }
 async function doSearch(q,auto){
+  cur.cardId=null; // alter Treffer verwerfen, damit der Hintergrund-Cardmarket-Link für die neue Suche greift
   $('results').innerHTML='<div class="mut">Suche…</div>';
   const{num,rest,code}=parseQuery(q);
   let details=[];
@@ -749,6 +750,12 @@ async function doSearch(q,auto){
     if(auto&&details.length===1)d.onclick();
     box.appendChild(d);
   });
+  // Cardmarket-Link schon im Hintergrund bereitstellen (Top-Treffer), bevor der User tippt
+  if(!cur.cardId&&details.length){
+    const c0=details[0];
+    cur.cmUrl='https://www.cardmarket.com/en/Pokemon/Products/Search?searchString='+encodeURIComponent(c0.name+' '+(c0.set?c0.set.name:''));
+    renderCard();
+  }
 }
 $('btnOcr').onclick=()=>ocrIdentify();
 $('btnSearch').onclick=()=>{const q=$('q').value.trim();if(q)doSearch(q,false);};
@@ -879,35 +886,38 @@ function findSetBox(card){
 // OCR the 3 set letters inside the black box (glyphs bright on dark -> invert pass), Otsu, bilinear upscale
 async function ocrSetLetters(card,box){
   const w=await tessWorker();
-  const x0=box.x+2,y0=box.y+2,x1=box.x+2+Math.round(box.w*0.62),y1=box.y+box.h-2;
-  const cv=grayCanvas(card,x0,y0,Math.max(6,x1-x0),Math.max(6,y1-y0),10,true);
-  const x=cv.getContext('2d',{willReadFrequently:true});
-  const d=x.getImageData(0,0,cv.width,cv.height);
-  const o=otsu(d.data);
-  const mk=inv=>{const c2=document.createElement('canvas');c2.width=cv.width;c2.height=cv.height;
-    const x2=c2.getContext('2d',{willReadFrequently:true});const d2=x2.createImageData(cv.width,cv.height);
-    for(let i=0;i<d.data.length;i+=4){const L=luma(d.data,i);const v=(L>o.t)===!!inv?0:255;d2.data[i]=d2.data[i+1]=d2.data[i+2]=v;d2.data[i+3]=255;}
-    x2.putImageData(d2,0,0);return c2;};
   let fb='',fbRaw='';
   const firstInv=box.mode!=='dark';
-  for(const c2 of [firstInv?mk(true):mk(false),firstInv?mk(false):mk(true)]){
-    for(const psm of ['7','8']){
-      try{
-        await w.setParameters({tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ',tessedit_pageseg_mode:psm});
-        const r=await w.recognize(c2);
-        const raw=((r.data&&r.data.text)||'');
-        const t=raw.replace(/[^A-Za-z]/g,'').toUpperCase();
-        let t2=null;
-  // fuzzy: 1 substitute/drop/insert fixes OCR slips like ASL->ASC
-  if(!SETCODES[t]){
-    if(t.length===3){for(const k of Object.keys(SETCODES)){if(k.length===3){let d=0;for(let i=0;i<3;i++)if(k[i]!==t[i])d++;if(d<=1){t2=k;break;}}}}
-    else if(t.length===2){for(const k of Object.keys(SETCODES)){if(k.length===3&&(k.startsWith(t)||k.endsWith(t))){t2=k;break;}}}
-    else if(t.length===4){for(const k of Object.keys(SETCODES)){if(k.length===3&&(k===t.slice(0,3)||k===t.slice(1))){t2=k;break;}}}
-  }
-        if(SETCODES[t]||(t2&&SETCODES[t2])){await w.setParameters({tessedit_char_whitelist:'',tessedit_pageseg_mode:'3'});return{code:t2||t,raw:raw};}
-        if(t.length===3&&t.length>fb.length){fb=t;fbRaw=raw;}
-        else if(t.length>=2&&t.length<=5&&!fb){fb=t;fbRaw=raw;}
-      }catch(e){}
+  // try multiple crop widths: 0.62 (standard), 0.55, 0.70 — catches wide/tight letter zones
+  for(const frac of [0.62,0.55,0.70]){
+    const x0=box.x+2,y0=box.y+2,x1=box.x+2+Math.round(box.w*frac),y1=box.y+box.h-2;
+    const cv=grayCanvas(card,x0,y0,Math.max(6,x1-x0),Math.max(6,y1-y0),10,true);
+    const x=cv.getContext('2d',{willReadFrequently:true});
+    const d=x.getImageData(0,0,cv.width,cv.height);
+    const o=otsu(d.data);
+    const mk=inv=>{const c2=document.createElement('canvas');c2.width=cv.width;c2.height=cv.height;
+      const x2=c2.getContext('2d',{willReadFrequently:true});const d2=x2.createImageData(cv.width,cv.height);
+      for(let i=0;i<d.data.length;i+=4){const L=luma(d.data,i);const v=(L>o.t)===!!inv?0:255;d2.data[i]=d2.data[i+1]=d2.data[i+2]=v;d2.data[i+3]=255;}
+      x2.putImageData(d2,0,0);return c2;};
+    for(const c2 of [firstInv?mk(true):mk(false),firstInv?mk(false):mk(true)]){
+      for(const psm of ['7','8']){
+        try{
+          await w.setParameters({tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ',tessedit_pageseg_mode:psm});
+          const r=await w.recognize(c2);
+          const raw=((r.data&&r.data.text)||'');
+          const t=raw.replace(/[^A-Za-z]/g,'').toUpperCase();
+          let t2=null;
+          // fuzzy: 1 substitute/drop/insert fixes OCR slips like ASL->ASC
+          if(!SETCODES[t]){
+            if(t.length===3){for(const k of Object.keys(SETCODES)){if(k.length===3){let d=0;for(let i=0;i<3;i++)if(k[i]!==t[i])d++;if(d<=1){t2=k;break;}}}}
+            else if(t.length===2){for(const k of Object.keys(SETCODES)){if(k.length===3&&(k.startsWith(t)||k.endsWith(t))){t2=k;break;}}}
+            else if(t.length===4){for(const k of Object.keys(SETCODES)){if(k.length===3&&(k===t.slice(0,3)||k===t.slice(1))){t2=k;break;}}}
+          }
+          if(SETCODES[t]||(t2&&SETCODES[t2])){await w.setParameters({tessedit_char_whitelist:'',tessedit_pageseg_mode:'3'});return{code:t2||t,raw:raw};}
+          if(t.length===3&&t.length>fb.length){fb=t;fbRaw=raw;}
+          else if(t.length>=2&&t.length<=5&&!fb){fb=t;fbRaw=raw;}
+        }catch(e){}
+      }
     }
   }
   await w.setParameters({tessedit_char_whitelist:'',tessedit_pageseg_mode:'3'});
