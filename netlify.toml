@@ -4,6 +4,6 @@
 # Netlify leitet transparent auf tcgcsv.com weiter.
 [[redirects]]
   from = "/tcgcsv/*"
-  to = "https://tcgcsv.com/tcgplayer/:splat"
+  to = "https://tcgcsv.com/:splat"
   status = 200
   force = true
